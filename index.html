@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Tracking - Finger Tips</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="cotton-controlpanel/controlpanel.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="paper-full.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection@2.0.0/dist/hand-pose-detection.min.js"></script>
+</head>
+<body>
+    <div id="calibration-overlay" class="calibration-overlay" hidden aria-hidden="true">
+        <div class="calibration-overlay__card">
+            <p class="calibration-overlay__message">Hold your hand flat, parallel to the screen to start</p>
+            <img class="calibration-overlay__hand" src="hand-outline.svg" alt="" width="200" height="200" />
+            <p id="calibration-progress" class="calibration-overlay__progress" aria-live="polite"></p>
+        </div>
+    </div>
+    <div id="control-panel"></div>
+    <script src="cotton-controlpanel/controlpanel.js"></script>
+    <script src="sketch.js"></script>
+</body>
+</html>
