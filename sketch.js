@@ -280,6 +280,67 @@ const INTERSECTION_COLOR_MAP = {
   '#f945a6,#f945a6': '#E3047C', // pink + pink
 };
 
+// Precomputed multiply blend results → brand overlap color replacement table.
+// Built once at startup from COLOR_PALETTE + INTERSECTION_COLOR_MAP.
+// Maps quantized multiply-result RGB → {r, g, b} brand overlap color.
+let MULTIPLY_TO_BRAND = null; // built lazily
+const OVERLAP_TOLERANCE = 8; // per-channel tolerance for matching multiply results
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+function buildMultiplyLookup() {
+  MULTIPLY_TO_BRAND = [];
+  // Also store primary colors so we can skip single-color pixels fast
+  const primaries = new Set();
+  for (const c of COLOR_PALETTE) {
+    const rgb = hexToRgb(c);
+    primaries.add((rgb.r << 16) | (rgb.g << 8) | rgb.b);
+  }
+  // For each pair in the intersection map, compute what MULTIPLY would produce
+  for (const key in INTERSECTION_COLOR_MAP) {
+    const parts = key.split(',');
+    if (parts.length !== 2) continue;
+    const c1 = hexToRgb(parts[0]), c2 = hexToRgb(parts[1]);
+    // Canvas multiply: result = src * dst / 255 (per channel)
+    const mr = Math.round(c1.r * c2.r / 255);
+    const mg = Math.round(c1.g * c2.g / 255);
+    const mb = Math.round(c1.b * c2.b / 255);
+    const brand = hexToRgb(INTERSECTION_COLOR_MAP[key]);
+    // Skip if the multiply result is the same as a primary (single-finger pixel would be misidentified)
+    const mKey = (mr << 16) | (mg << 8) | mb;
+    if (primaries.has(mKey)) continue;
+    MULTIPLY_TO_BRAND.push({ mr, mg, mb, br: brand.r, bg: brand.g, bb: brand.b });
+  }
+}
+
+/** Replace multiply-blended overlap pixels with brand overlap colors on a p5.Graphics buffer. */
+function fixOverlapColors(buf) {
+  if (!MULTIPLY_TO_BRAND) buildMultiplyLookup();
+  if (MULTIPLY_TO_BRAND.length === 0) return;
+  const ctx = buf.drawingContext;
+  const w = buf.width, h = buf.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+  const tol = OVERLAP_TOLERANCE;
+  const lookups = MULTIPLY_TO_BRAND;
+  const n = lookups.length;
+  for (let px = 0; px < d.length; px += 4) {
+    if (d[px + 3] < 128) continue; // skip transparent/semi-transparent pixels
+    const r = d[px], g = d[px + 1], b = d[px + 2];
+    for (let li = 0; li < n; li++) {
+      const l = lookups[li];
+      if (Math.abs(r - l.mr) <= tol && Math.abs(g - l.mg) <= tol && Math.abs(b - l.mb) <= tol) {
+        d[px] = l.br; d[px + 1] = l.bg; d[px + 2] = l.bb;
+        break;
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
 // Helper function to get intersection color from two source colors
 function getIntersectionColor(color1, color2) {
   // Normalize colors (ensure they're in the same format)
@@ -3035,6 +3096,17 @@ function draw() {
   }
   handDrawTargets = null; // reset after drawing
 
+  // Replace multiply-blended overlap pixels with exact brand overlap colors
+  if (showIntersections && _useMultiply) {
+    if (needsSplitBuffers) {
+      for (let hi = 0; hi < 2; hi++) {
+        if (perHandBuffers[hi]) fixOverlapColors(perHandBuffers[hi]);
+      }
+    } else {
+      fixOverlapColors(handsBuffer);
+    }
+  }
+
   // Helper: resolve drawable source + dimensions from a texture entry
   function texSrc(t) {
     if (!t) return null;
@@ -4798,87 +4870,6 @@ function drawHands() {
       }
     }
 
-    // Compute intersections for all pairs of finger shapes for this hand (only if enabled)
-    if (showIntersections) {
-      const fingerNames = Object.keys(FINGER_TIPS);
-      const fingerShapes = [];
-
-      // Pre-compute low-res outline paths per finger (not per pair — avoids redundant calls)
-      for (let fingerName of fingerNames) {
-        if (paperShapes[i] && paperShapes[i][fingerName] && paperShapes[i][fingerName].shape) {
-          const sd = paperShapes[i][fingerName];
-          const outlinePath = shapeToPath(sd.shape, sd.strokeWidth, true); // lowRes for fast boolean ops
-          fingerShapes.push({
-            name: fingerName,
-            shape: sd.shape,
-            path: outlinePath, // pre-computed outline
-            shapeData: sd
-          });
-        }
-      }
-      
-      // Switch to BLEND mode for intersections so brand overlap colors
-      // are drawn opaque on top (not multiplied against existing shapes)
-      const prevBlendMode = hBuf.drawingContext.globalCompositeOperation;
-      hBuf.blendMode(BLEND);
-
-      // Compute intersection for each pair of finger shapes
-      for (let j = 0; j < fingerShapes.length; j++) {
-        for (let k = j + 1; k < fingerShapes.length; k++) {
-          const path1 = fingerShapes[j].path;
-          const path2 = fingerShapes[k].path;
-          if (!path1 || !path2) continue;
-
-          // Fast bounding box pre-check — skip pairs that can't possibly overlap
-          if (!path1.bounds.intersects(path2.bounds)) continue;
-
-          const shapeData1 = fingerShapes[j].shapeData;
-          const shapeData2 = fingerShapes[k].shapeData;
-          const color1 = shapeData1 ? shapeData1.color : null;
-          const color2 = shapeData2 ? shapeData2.color : null;
-
-          try {
-              const path1Clone = path1.clone();
-              const path2Clone = path2.clone();
-
-              // Compute intersection
-              const intersection = path1Clone.intersect(path2Clone);
-
-              if (intersection && intersection.segments && intersection.segments.length > 0) {
-                // Determine intersection color from the two source colors
-                let intersectionColor = '#000000'; // Default to black
-                if (color1 && color2 && typeof color1 === 'string' && typeof color2 === 'string') {
-                  intersectionColor = getIntersectionColor(color1, color2);
-                }
-
-                // Ensure we have a valid color (fallback to black)
-                if (!intersectionColor || typeof intersectionColor !== 'string') {
-                  intersectionColor = '#000000';
-                }
-
-                // Export intersection to p5 with mapped color
-                exportPaperPathToP5(intersection, hBuf, intersectionColor);
-                
-                // Clean up cloned paths
-                path1Clone.remove();
-                path2Clone.remove();
-                if (intersection !== path1Clone && intersection !== path2Clone) {
-                  intersection.remove();
-                }
-              } else {
-                // Clean up if no intersection
-                path1Clone.remove();
-                path2Clone.remove();
-              }
-          } catch (error) {
-            // Silently handle intersection errors (e.g., no intersection, invalid geometry)
-            console.debug('Intersection error:', error);
-          }
-        }
-      }
-
-      // Restore previous blend mode
-      hBuf.drawingContext.globalCompositeOperation = prevBlendMode;
     }
   }
   

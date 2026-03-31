@@ -25,6 +25,31 @@
     return OVERLAP_COLORS[key] || null;
   }
 
+  function hexToRgb(hex) {
+    var n = parseInt(hex.replace('#', ''), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+
+  // Precompute multiply-result → brand-overlap-color lookup (built once)
+  var MULTIPLY_LOOKUP = null;
+  function getMultiplyLookup() {
+    if (MULTIPLY_LOOKUP) return MULTIPLY_LOOKUP;
+    MULTIPLY_LOOKUP = [];
+    for (var key in OVERLAP_COLORS) {
+      var parts = key.split(',');
+      if (parts.length !== 2) continue;
+      var c1 = hexToRgb(parts[0]), c2 = hexToRgb(parts[1]);
+      var brand = hexToRgb(OVERLAP_COLORS[key]);
+      MULTIPLY_LOOKUP.push({
+        mr: Math.round(c1.r * c2.r / 255),
+        mg: Math.round(c1.g * c2.g / 255),
+        mb: Math.round(c1.b * c2.b / 255),
+        br: brand.r, bg: brand.g, bb: brand.b
+      });
+    }
+    return MULTIPLY_LOOKUP;
+  }
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -565,13 +590,27 @@
       }
       offCtx.restore();
 
-      // Composite onto main canvas: copy only non-white pixels (the shapes)
+      // Single pixel pass: fix overlap colors + strip white background
       ctx.clearRect(0, 0, size, size);
       var imgData = offCtx.getImageData(0, 0, size, size);
       var d = imgData.data;
+      var lookups = getMultiplyLookup();
+      var ln = lookups.length;
+      var tol = 8;
       for (var px = 0; px < d.length; px += 4) {
+        // White background → transparent
         if (d[px] >= 254 && d[px + 1] >= 254 && d[px + 2] >= 254) {
-          d[px + 3] = 0; // make white pixels transparent
+          d[px + 3] = 0;
+          continue;
+        }
+        // Check if this pixel matches a multiply blend result → replace with brand color
+        var r = d[px], g = d[px + 1], b = d[px + 2];
+        for (var li = 0; li < ln; li++) {
+          var l = lookups[li];
+          if (Math.abs(r - l.mr) <= tol && Math.abs(g - l.mg) <= tol && Math.abs(b - l.mb) <= tol) {
+            d[px] = l.br; d[px + 1] = l.bg; d[px + 2] = l.bb;
+            break;
+          }
         }
       }
       ctx.putImageData(imgData, 0, 0);
