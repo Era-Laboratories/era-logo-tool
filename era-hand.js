@@ -222,7 +222,7 @@
       // Partial undrawing
       var visPortion = 1.0 - (rbc / 0.3) * 0.3;
 
-      ctx.lineCap = 'square';
+      ctx.lineCap = 'butt';
       ctx.lineWidth = rectWidth;
 
       if (visPortion < 1.0) {
