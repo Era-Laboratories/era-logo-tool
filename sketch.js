@@ -2965,7 +2965,9 @@ function keyPressed() {
 function draw() {
   drawBackgroundLayer();
 	const _m0 = getHandFillMode(0), _m1 = getHandFillMode(1);
-	const _useMultiply = (_m0 === 'brand' || _m0 === 'standardized') && (_m1 === 'brand' || _m1 === 'standardized');
+	const _isMulticolorMode = (_m0 === 'brand' || _m0 === 'standardized') && (_m1 === 'brand' || _m1 === 'standardized');
+	// Use MULTIPLY whenever we need overlap detection (showIntersections) or for multicolor modes
+	const _useMultiply = _isMulticolorMode || showIntersections;
 	handsBuffer.blendMode(_useMultiply ? MULTIPLY : BLEND);
   
   // Manual hand detection with frame skipping (non-blocking)
