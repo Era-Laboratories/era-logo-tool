@@ -348,6 +348,12 @@
     document.body.appendChild(canvas);
     var ctx = canvas.getContext('2d');
 
+    // Offscreen buffer for multiply blending
+    var offCanvas = document.createElement('canvas');
+    offCanvas.width = size;
+    offCanvas.height = size;
+    var offCtx = offCanvas.getContext('2d');
+
     // Hide default cursor
     var cursorStyle = null;
     if (hideCursor) {
@@ -518,22 +524,33 @@
       var ty = canvasY - size / 2;
       canvas.style.transform = 'translate(' + tx + 'px,' + ty + 'px)';
 
-      // Clear & draw
-      ctx.clearRect(0, 0, size, size);
-      ctx.save();
-      // Mirror horizontally (hand was captured mirrored)
-      ctx.translate(size, 0);
-      ctx.scale(-1, 1);
-      // Scale from pose coordinate space into canvas, centered
+      // Draw to offscreen buffer with multiply blend (white bg → multiply → remove white)
+      offCtx.globalCompositeOperation = 'source-over';
+      offCtx.clearRect(0, 0, size, size);
+      offCtx.fillStyle = '#ffffff';
+      offCtx.fillRect(0, 0, size, size);
+      offCtx.globalCompositeOperation = 'multiply';
+      offCtx.save();
+      offCtx.translate(size, 0);
+      offCtx.scale(-1, 1);
       var refSize = poseScales[activePoseName] || 200;
       var scale = size / refSize;
-      ctx.translate(size / 2, size / 2);
-      ctx.globalAlpha = opts.opacity !== undefined ? opts.opacity : 0.85;
+      offCtx.translate(size / 2, size / 2);
       for (var fk in renderPose) {
-        renderFinger(ctx, renderPose[fk], scale);
+        renderFinger(offCtx, renderPose[fk], scale);
       }
-      ctx.globalAlpha = 1.0;
-      ctx.restore();
+      offCtx.restore();
+
+      // Composite onto main canvas: copy only non-white pixels (the shapes)
+      ctx.clearRect(0, 0, size, size);
+      var imgData = offCtx.getImageData(0, 0, size, size);
+      var d = imgData.data;
+      for (var px = 0; px < d.length; px += 4) {
+        if (d[px] >= 254 && d[px + 1] >= 254 && d[px + 2] >= 254) {
+          d[px + 3] = 0; // make white pixels transparent
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
     }
 
     rafId = requestAnimationFrame(frame);
@@ -558,6 +575,16 @@
         hoverRules = hoverRules.filter(function (r) {
           return r.selector !== selector;
         });
+      },
+
+      setSize: function (newSize) {
+        size = newSize;
+        canvas.width = size;
+        canvas.height = size;
+        canvas.style.width = size + 'px';
+        canvas.style.height = size + 'px';
+        offCanvas.width = size;
+        offCanvas.height = size;
       },
 
       destroy: function () {

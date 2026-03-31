@@ -100,6 +100,7 @@ const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 // Widget pose library
 let widgetPoses = {}; // { poseName: { fingers: {handIdx: {fingerName: params}}, refSize: number } }
 let widgetPreviewInstance = null; // live EraHand instance for preview
+let widgetSize = 150;
 
 // Paper.js shape storage - stores Paper.js shapes per hand and finger
 let paperShapes = {}; // Structure: paperShapes[handIndex][fingerName] = { shape: paperObject, type: 'rect'|'circle'|'bezier', color: colorString }
@@ -2117,7 +2118,7 @@ function toggleWidgetPreview(on) {
     }
     widgetPreviewInstance = EraHand.create({
       poses: widgetPoses,
-      size: 150,
+      size: widgetSize,
       defaultPose: Object.keys(widgetPoses)[0],
       pressPose: widgetPoses.grab ? 'grab' : null,
       cursor: true,
@@ -2584,6 +2585,20 @@ async function setup() {
             {
               type: 'section',
               label: 'Preview'
+            },
+            {
+              type: 'slider',
+              id: 'widgetSize',
+              min: 50,
+              max: 400,
+              step: 10,
+              value: widgetSize,
+              label: 'Widget size',
+              suffix: 'px',
+              onChange: (v) => {
+                widgetSize = v;
+                if (widgetPreviewInstance) widgetPreviewInstance.setSize(v);
+              }
             },
             {
               type: 'checkbox',
