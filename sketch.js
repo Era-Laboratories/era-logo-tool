@@ -3227,11 +3227,21 @@ function exportPaperCircleToP5(circleShape, colorObj, buffer, rectBezOrCircle, f
         // Calculate center of line segment
         lineSegmentCenterX = (startLocation.point.x + endLocation.point.x) / 2;
         lineSegmentCenterY = (startLocation.point.y + endLocation.point.y) / 2;
-        
+
         // Calculate angle of line segment
         const dx = endLocation.point.x - startLocation.point.x;
         const dy = endLocation.point.y - startLocation.point.y;
         lineSegmentAngle = Math.atan2(dy, dx);
+      } else {
+        // getLocationAt returned null (common for exact endpoint) — fall back to base-to-tip angle
+        const dx = drawTipX - drawBaseX;
+        const dy = drawTipY - drawBaseY;
+        const baseToTipLength = Math.sqrt(dx * dx + dy * dy);
+        if (baseToTipLength > 0.001) {
+          lineSegmentAngle = Math.atan2(dy, dx);
+          lineSegmentCenterX = drawTipX;
+          lineSegmentCenterY = drawTipY;
+        }
       }
     } catch (e) {
       // Fallback: use tip position and calculate angle from base to tip
