@@ -182,7 +182,7 @@ let frameBufferDebugInfo = {
 //   "#86CAF1", // light blue
 //   "#BFFF10", // neon lime
 //   "#CA9DD4", // lavender
-//   "#F5F557", // soft yellow
+//   "#F5F500", // soft yellow
 //   "#F945A6", // hot pink
 //   "#FFD263"  // warm yellow / amber
 // ];
@@ -193,7 +193,7 @@ let frameBufferDebugInfo = {
 //   "#86CAF1", // light blue
 //   "#BFFF10", // neon lime
 //   "#CA9DD4", // lavender
-//   "#F5F557", // soft yellow
+//   "#F5F500", // soft yellow
 //   "#F945A6", // hot pink
 // ];
 
@@ -203,29 +203,29 @@ let frameBufferDebugInfo = {
 //   "#86CAF1", // light blue
 //   "#BFFF10", // neon lime
 //   "#CA9DD4", // lavender
-//   "#F5F557", // soft yellow
+//   "#F5F500", // soft yellow
 //   "#F945A6", // hot pink
 //   "#FF643D"  // bright red/orange
 // ];
 
 // v3c - overall more saturated
 const COLOR_PALETTE = [
-  "#5AF2AF", // mint green
-  "#2FB3FF", // light blue
-  "#BFFF10", // neon lime
-  "#E084F4", // lavender
-  "#F5F557", // soft yellow
-  "#F945A6", // hot pink
-	"#FF4D01"  // bright red/orange
+  "#5AF2AF", // green
+  "#2FB3FF", // blue
+  "#BFFF10", // lime
+  "#E084F4", // purple
+  "#F5F500", // yellow
+  "#F945A6", // pink
+	"#FF4D01"  // red/orange
 ];
 
 // Standardized brand colors: thumb→pinky = blue, green, red, purple, yellow
 const STANDARDIZED_FINGER_COLORS = {
   thumb:  "#2FB3FF", // blue
-  index:  "#BFFF10", // green (neon lime)
+  index:  "#BFFF10", // lime
   middle: "#FF4D01", // red/orange
   ring:   "#E084F4", // purple
-  pinky:  "#F5F557"  // yellow
+  pinky:  "#F5F500"  // yellow
 };
 
 // Ensure every hand has exactly one finger colored hot pink or bright orange/red
@@ -241,42 +241,42 @@ const BRIGHT_ORANGE_RED = "#FF4D01";
 // Colors are sorted alphabetically so order doesn't matter (e.g., '#006258,#1216F6' is the same as '#1216F6,#006258')
 // Overlap color lookup from brand guidelines (Overlap Color Palette.pdf)
 // Keys are sorted lowercase hex pairs. Order: green, blue, lime, red, purple, yellow, pink
-// Grid: rows = columns = [#5AF2AF, #2FB3FF, #BFFF10, #FF4D01, #E084F4, #F5F557, #F945A6]
+// Grid: rows = columns = [#5AF2AF, #2FB3FF, #BFFF10, #FF4D01, #E084F4, #F5F500, #F945A6]
 const INTERSECTION_COLOR_MAP = {
   // green (#5AF2AF) overlaps
   '#2fb3ff,#5af2af': '#3B99B8', // green + blue
   '#5af2af,#bfff10': '#28D287', // green + lime
   '#5af2af,#ff4d01': '#B8633F', // green + red
   '#5af2af,#e084f4': '#5A5FF2', // green + purple
-  '#5af2af,#f5f557': '#4CDC79', // green + yellow
+  '#5af2af,#f5f500': '#4CDC79', // green + yellow
   '#5af2af,#f945a6': '#E3047C', // green + pink
   // blue (#2FB3FF) overlaps
   '#2fb3ff,#bfff10': '#23B310', // blue + lime
   '#2fb3ff,#ff4d01': '#D32A00', // blue + red
   '#2fb3ff,#e084f4': '#5A5FF2', // blue + purple
-  '#2fb3ff,#f5f557': '#BCE100', // blue + yellow
+  '#2fb3ff,#f5f500': '#BCE100', // blue + yellow
   '#2fb3ff,#f945a6': '#3B99B8', // blue + pink
   // lime (#BFFF10) overlaps
   '#bfff10,#ff4d01': '#D78D47', // lime + red
   '#bfff10,#e084f4': '#6C7DEE', // lime + purple
-  '#bfff10,#f5f557': '#DDE415', // lime + yellow
+  '#bfff10,#f5f500': '#DDE415', // lime + yellow
   '#bfff10,#f945a6': '#FD7CDD', // lime + pink
   // red (#FF4D01) overlaps
   '#e084f4,#ff4d01': '#C5010E', // red + purple
-  '#f5f557,#ff4d01': '#FF8001', // red + yellow
+  '#f5f500,#ff4d01': '#FF8001', // red + yellow
   '#f945a6,#ff4d01': '#C5010E', // red + pink
   // purple (#E084F4) overlaps
-  '#e084f4,#f5f557': '#ED67C9', // purple + yellow
+  '#e084f4,#f5f500': '#ED67C9', // purple + yellow
   '#e084f4,#f945a6': '#C739A8', // purple + pink
-  // yellow (#F5F557) overlaps
-  '#f5f557,#f945a6': '#F9CF45', // yellow + pink
+  // yellow (#F5F500) overlaps
+  '#f5f500,#f945a6': '#F9CF45', // yellow + pink
   // Self-overlaps (same color on same color)
   '#5af2af,#5af2af': '#E3047C', // green + green
   '#2fb3ff,#2fb3ff': '#2D8AD7', // blue + blue
   '#bfff10,#bfff10': '#B3EE10', // lime + lime
   '#ff4d01,#ff4d01': '#D32A00', // red + red
   '#e084f4,#e084f4': '#C75ADF', // purple + purple
-  '#f5f557,#f5f557': '#E1E100', // yellow + yellow
+  '#f5f500,#f5f500': '#E1E100', // yellow + yellow
   '#f945a6,#f945a6': '#E3047C', // pink + pink
 };
 
