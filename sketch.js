@@ -2785,6 +2785,18 @@ async function setup() {
               }
             },
             {
+              type: 'slider',
+              id: 'widgetOpacity',
+              min: 0.1,
+              max: 1.0,
+              step: 0.05,
+              value: 1.0,
+              label: 'Opacity',
+              onChange: (v) => {
+                if (widgetPreviewInstance) widgetPreviewInstance.setOpacity(v);
+              }
+            },
+            {
               type: 'checkbox',
               id: 'widgetPreview',
               label: 'Preview widget cursor',
@@ -4200,10 +4212,12 @@ function calculateNormalizeOffset(bufferedHands, layout) {
     const avgX = sumX / landmarks.length;
     const avgY = sumY / landmarks.length;
     
-    // Calculate current raw scale for this hand
-    const currentRawScale = computeHandScale(landmarks, i);
-    
-    // Calculate scale factor to normalize raw scale to 120
+    // Use the EMA-smoothed hand scale for normalization to prevent tip jitter.
+    // The raw computeHandScale fluctuates frame-to-frame from ML noise, and since
+    // normalization scales landmarks around the centroid, tips (farthest from centroid)
+    // get the most amplification — causing visible jitter that exceeds the dead zone.
+    const currentRawScale = getSmoothedRawHandScale(i);
+
     const targetRawScale = 100;
     let scaleFactor = 1.0;
     if (currentRawScale > 0) {

@@ -361,7 +361,8 @@
     var hideCursor = opts.cursor !== undefined ? opts.cursor : true;
     var poseSpeed = opts.lerpSpeed || 0.12;
     var cursorSmooth = opts.cursorSmooth || 0.3;
-    var pressPose = opts.pressPose || null; // pose to show on mousedown/touchstart
+    var pressPose = opts.pressPose || null;
+    var opacity = opts.opacity !== undefined ? opts.opacity : 1.0;
 
     // Normalize all poses to keyed maps and compute per-pose scale
     var poses = {};
@@ -580,7 +581,7 @@
       ctx.clearRect(0, 0, size, size);
       var refSize = poseScales[activePoseName] || 200;
       var scale = size / refSize;
-      var alpha = opts.opacity !== undefined ? opts.opacity : 0.85;
+      var alpha = opacity;
 
       // Draw all fingers to main canvas
       offCtx.clearRect(0, 0, size, size);
@@ -656,6 +657,8 @@
         offCanvas.width = size;
         offCanvas.height = size;
       },
+
+      setOpacity: function (val) { opacity = val; },
 
       destroy: function () {
         destroyed = true;
