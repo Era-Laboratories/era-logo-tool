@@ -99,6 +99,7 @@ const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 
 // Widget pose library
 let widgetPoses = {}; // { poseName: { fingers: {handIdx: {fingerName: params}}, refSize: number } }
+let widgetPreviewInstance = null; // live EraHand instance for preview
 
 // Paper.js shape storage - stores Paper.js shapes per hand and finger
 let paperShapes = {}; // Structure: paperShapes[handIndex][fingerName] = { shape: paperObject, type: 'rect'|'circle'|'bezier', color: colorString }
@@ -2106,6 +2107,30 @@ function updatePoseList() {
   el.textContent = names.length === 0 ? 'No poses saved' : names.join(', ');
 }
 
+function toggleWidgetPreview(on) {
+  if (on) {
+    // Destroy existing instance if any
+    if (widgetPreviewInstance) { widgetPreviewInstance.destroy(); widgetPreviewInstance = null; }
+    if (Object.keys(widgetPoses).length === 0) {
+      console.warn('No poses captured — capture at least one pose first');
+      return;
+    }
+    widgetPreviewInstance = EraHand.create({
+      poses: widgetPoses,
+      size: 150,
+      defaultPose: Object.keys(widgetPoses)[0],
+      cursor: true,
+      lerpSpeed: 0.12,
+      cursorSmooth: 0.3
+    });
+    // Set up hover rules if poses exist
+    if (widgetPoses.pointer) widgetPreviewInstance.on('a, button', 'pointer');
+    if (widgetPoses.grab) widgetPreviewInstance.on('.draggable, input[type="range"]', 'grab');
+  } else {
+    if (widgetPreviewInstance) { widgetPreviewInstance.destroy(); widgetPreviewInstance = null; }
+  }
+}
+
 function exportWidgetPoses() {
   const json = JSON.stringify({ poses: widgetPoses }, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
@@ -2557,30 +2582,28 @@ async function setup() {
             },
             {
               type: 'section',
+              label: 'Preview'
+            },
+            {
+              type: 'checkbox',
+              id: 'widgetPreview',
+              label: 'Preview widget cursor',
+              value: false,
+              toggle: true,
+              onChange: (v) => { toggleWidgetPreview(v); }
+            },
+            {
+              type: 'section',
               label: 'Export'
             },
             {
-              type: 'group',
-              className: 'cotton-cp-export-stack',
-              controls: [
-                {
-                  type: 'button',
-                  id: 'widget-export-json',
-                  label: 'Export Poses (JSON)',
-                  variant: 'primary',
-                  block: true,
-                  medium: true,
-                  onClick: () => { exportWidgetPoses(); }
-                },
-                {
-                  type: 'button',
-                  id: 'widget-open-test',
-                  label: 'Open Test Playground',
-                  variant: 'secondary',
-                  block: true,
-                  onClick: () => { window.open('era-hand-test.html', '_blank'); }
-                }
-              ]
+              type: 'button',
+              id: 'widget-export-json',
+              label: 'Export Poses (JSON)',
+              variant: 'primary',
+              block: true,
+              medium: true,
+              onClick: () => { exportWidgetPoses(); }
             }
           ]
         },
