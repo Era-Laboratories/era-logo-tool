@@ -4870,7 +4870,6 @@ function drawHands() {
                 path1Clone.remove();
                 path2Clone.remove();
               }
-            }
           } catch (error) {
             // Silently handle intersection errors (e.g., no intersection, invalid geometry)
             console.debug('Intersection error:', error);
