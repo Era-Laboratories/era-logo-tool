@@ -372,6 +372,104 @@ body {
   font-size: 12px;
 }
 
+.cotton-cp-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cotton-cp-color-input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--cp-border, #ccc);
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+  background: none;
+}
+
+.cotton-cp-color-input::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.cotton-cp-color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+/* Swatches */
+.cotton-cp-swatches-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.cotton-cp-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+}
+
+.cotton-cp-swatch:hover {
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.15);
+}
+
+.cotton-cp-swatch--active {
+  border-color: var(--cp-accent, #333);
+  box-shadow: 0 0 0 2px var(--cp-accent, #333);
+}
+
+.cotton-cp-swatch--light {
+  border-color: #ddd;
+}
+
+.cotton-cp-swatch--light.cotton-cp-swatch--active {
+  border-color: var(--cp-accent, #333);
+}
+
+.cotton-cp-swatch--multi {
+  border-color: #ddd;
+}
+
+.cotton-cp-swatch--custom,
+.cotton-cp-swatch--upload {
+  background: #eee;
+  color: #888;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-color: #ddd;
+}
+
+.cotton-cp-swatch--upload {
+  font-size: 14px;
+}
+
+.cotton-cp-swatch--thumb {
+  background-size: cover;
+  background-position: center;
+}
+
+.cotton-cp-swatches-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--cp-muted, #888);
+  margin-bottom: 2px;
+}
+
 .cotton-cp-section {
   margin: 16px 0 6px;
   font-weight: 400;

@@ -86,6 +86,12 @@
     };
   };
 
+  CottonControlPanel.prototype.addSwatch = function (controlId, swatchSpec) {
+    var info = this._swatchRows && this._swatchRows[controlId];
+    if (!info) return;
+    info.addSwatch(swatchSpec);
+  };
+
   CottonControlPanel.prototype.destroy = function () {
     if (typeof this._hotkeyTeardown === 'function') {
       this._hotkeyTeardown();
@@ -453,6 +459,152 @@
     }
   }
 
+  function appendColor(host, spec, panel, listeners) {
+    const id = spec.id;
+    if (!id) return console.warn('CottonControlPanel: color needs id');
+
+    const wrap = el(host, 'div', 'cotton-cp-row cotton-cp-color');
+    if (spec.label) el(wrap, 'span', 'cotton-cp-label', spec.label);
+    const input = /** @type {HTMLInputElement} */ (el(wrap, 'input', 'cotton-cp-color-input'));
+    input.type = 'color';
+    input.value = String(initialValue(spec) || '#000000');
+
+    function read() { return input.value; }
+    function write(v) { input.value = String(v); }
+
+    bind(panel, id, read, write, function () {
+      input.addEventListener('input', function () {
+        panel._values[id] = read();
+        if (spec.onChange) spec.onChange(panel._values[id]);
+        emit(listeners, id, panel._values[id]);
+      });
+    });
+  }
+
+  /**
+   * Swatches control: a row of clickable color circles.
+   *
+   * spec.swatches      — array of { value, color, label?, multicolor?, colors?, thumbnail? }
+   * spec.customButton  — adds a "+" swatch that opens a native color picker
+   * spec.uploadButton  — adds an "↑" swatch that opens a file picker
+   * spec.uploadAccept  — accept attribute for the file picker (default 'image/*')
+   * spec.onCustomColor — called with hex string when custom color is picked
+   * spec.onUpload      — called with (File, controlId) when a file is chosen
+   *
+   * panel.addSwatch(controlId, swatchSpec) — dynamically adds a swatch to an existing row
+   */
+  function appendSwatches(host, spec, panel, listeners) {
+    const id = spec.id;
+    if (!id) return console.warn('CottonControlPanel: swatches needs id');
+
+    const wrap = el(host, 'div', 'cotton-cp-row cotton-cp-swatches');
+    const row = el(wrap, 'div', 'cotton-cp-swatches-row');
+
+    var swatchEls = [];
+    var actionBtns = []; // custom + upload buttons — new swatches insert before these
+    var def = String(initialValue(spec));
+    var customBtn = null;
+
+    function setActive(val) {
+      panel._values[id] = val;
+      for (var s = 0; s < swatchEls.length; s++) {
+        swatchEls[s].el.classList.toggle('cotton-cp-swatch--active', swatchEls[s].value === val);
+      }
+      if (customBtn) customBtn.classList.toggle('cotton-cp-swatch--active', val === '__custom__');
+      if (spec.onChange) spec.onChange(val);
+      emit(listeners, id, val);
+    }
+
+    function addSwatchToRow(sw) {
+      var btn = document.createElement('button');
+      btn.className = 'cotton-cp-swatch';
+      btn.type = 'button';
+      btn.title = sw.label || sw.value;
+      btn.setAttribute('aria-label', sw.label || sw.value);
+      if (sw.multicolor && sw.colors) {
+        btn.classList.add('cotton-cp-swatch--multi');
+        btn.style.background = 'conic-gradient(' + sw.colors.join(', ') + ', ' + sw.colors[0] + ')';
+      } else if (sw.thumbnail) {
+        btn.classList.add('cotton-cp-swatch--thumb');
+        btn.style.backgroundImage = 'url("' + sw.thumbnail.replace(/"/g, '\\"') + '")';
+        btn.style.backgroundSize = 'cover';
+        btn.style.backgroundPosition = 'center';
+      } else {
+        btn.style.background = sw.color || sw.value;
+        if (sw.color === '#FFFFFF' || sw.color === '#ffffff') {
+          btn.classList.add('cotton-cp-swatch--light');
+        }
+      }
+      if (String(sw.value) === panel._values[id]) btn.classList.add('cotton-cp-swatch--active');
+      btn.addEventListener('click', function () { setActive(sw.value); });
+      swatchEls.push({ el: btn, value: sw.value });
+
+      // Insert before action buttons so they stay at the end
+      var firstAction = actionBtns[0] || null;
+      if (firstAction) row.insertBefore(btn, firstAction);
+      else row.appendChild(btn);
+      return btn;
+    }
+
+    (spec.swatches || []).forEach(function (sw) { addSwatchToRow(sw); });
+
+    // Custom color button
+    if (spec.customButton) {
+      customBtn = el(row, 'button', 'cotton-cp-swatch cotton-cp-swatch--custom');
+      customBtn.type = 'button';
+      customBtn.title = 'Custom color';
+      customBtn.setAttribute('aria-label', 'Custom color');
+      customBtn.textContent = '+';
+      actionBtns.push(customBtn);
+      var customInput = /** @type {HTMLInputElement} */ (document.createElement('input'));
+      customInput.type = 'color';
+      customInput.className = 'cotton-cp-file-input-hidden';
+      customInput.value = spec.customDefault || '#FF0000';
+      wrap.appendChild(customInput);
+      customBtn.addEventListener('click', function () { customInput.click(); });
+      customInput.addEventListener('input', function () {
+        customBtn.style.background = customInput.value;
+        customBtn.textContent = '';
+        setActive('__custom__');
+        if (spec.onCustomColor) spec.onCustomColor(customInput.value);
+      });
+      if (def === '__custom__') {
+        customBtn.classList.add('cotton-cp-swatch--active');
+        customBtn.style.background = spec.customDefault || '#FF0000';
+        customBtn.textContent = '';
+      }
+    }
+
+    // Upload button
+    if (spec.uploadButton) {
+      var uploadBtn = el(row, 'button', 'cotton-cp-swatch cotton-cp-swatch--upload');
+      uploadBtn.type = 'button';
+      uploadBtn.title = 'Upload texture';
+      uploadBtn.setAttribute('aria-label', 'Upload texture');
+      uploadBtn.textContent = '\u2191'; // ↑
+      actionBtns.push(uploadBtn);
+      var fileInput = /** @type {HTMLInputElement} */ (document.createElement('input'));
+      fileInput.type = 'file';
+      fileInput.accept = spec.uploadAccept || 'image/*';
+      fileInput.className = 'cotton-cp-file-input-hidden';
+      wrap.appendChild(fileInput);
+      uploadBtn.addEventListener('click', function () { fileInput.click(); });
+      fileInput.addEventListener('change', function () {
+        if (fileInput.files && fileInput.files[0]) {
+          if (spec.onUpload) spec.onUpload(fileInput.files[0], id);
+          fileInput.value = '';
+        }
+      });
+    }
+
+    panel._values[id] = def;
+    panel._setters[id] = function (v) { setActive(v); };
+
+    // Store row reference so addSwatch works later
+    if (!panel._swatchRows) panel._swatchRows = {};
+    panel._swatchRows[id] = { addSwatch: addSwatchToRow, setActive: setActive };
+  }
+
   function appendSection(host, spec) {
     if (spec.label) el(host, 'div', 'cotton-cp-section', spec.label);
   }
@@ -486,6 +638,12 @@
         break;
       case 'fieldset':
         appendFieldset(host, spec, panel, listeners);
+        break;
+      case 'color':
+        appendColor(host, spec, panel, listeners);
+        break;
+      case 'swatches':
+        appendSwatches(host, spec, panel, listeners);
         break;
       case 'section':
         appendSection(host, spec);

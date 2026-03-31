@@ -28,6 +28,19 @@ let multicolor = true; // Finger fills use palette; off = #000000
 let bigHands = false; // Scale full hand skeleton + shapes from hand centroid when on
 const BIG_HANDS_SCALE = 1.75;
 
+// Hand fill: per-hand selection, shared texture pool
+// Each selection is 'brand', 'standardized', '#hexcolor', '__custom__', or 'texture:N'
+let handFillSelection = ['brand', 'brand']; // [left hand, right hand]
+let handFillCustomColor = '#FF0000';
+let handFillTextures = []; // [{img, video, type, objectUrl}, ...] shared pool
+let handFillSplitHands = false; // when true, each hand picks independently
+let handFillScaleToHand = false; // scale texture to combined hand bounding box
+let handBoundingBoxes = []; // [{x, y, w, h}, ...] computed per frame in drawHands
+// Per-hand drawing buffers — used when hands need different textures
+let perHandBuffers = [null, null];
+// When non-null, drawHands routes each hand's shapes to its own buffer
+let handDrawTargets = null; // null = all to handsBuffer, or [buf0, buf1]
+
 function scaleCanvasPointFromPivot(cx, cy, pivotCx, pivotCy, factor) {
   if (factor === 1) return { x: cx, y: cy };
   return {
@@ -185,6 +198,15 @@ const COLOR_PALETTE = [
   "#F945A6", // hot pink
 	"#FF4D01"  // bright red/orange
 ];
+
+// Standardized brand colors: thumb→pinky = blue, green, red, purple, yellow
+const STANDARDIZED_FINGER_COLORS = {
+  thumb:  "#2FB3FF", // blue
+  index:  "#BFFF10", // green (neon lime)
+  middle: "#FF4D01", // red/orange
+  ring:   "#E084F4", // purple
+  pinky:  "#F5F557"  // yellow
+};
 
 // Ensure every hand has exactly one finger colored hot pink or bright orange/red
 const ENSURE_ONE_ACCENT_FINGER = true;
@@ -1325,6 +1347,73 @@ function drawBackgroundLayer() {
   background(255);
 }
 
+/** Load an image or video file as a texture and call back with {img, video, type, objectUrl}. */
+function loadTextureFile(file, callback) {
+  const url = URL.createObjectURL(file);
+  if (file.type.startsWith('video/')) {
+    const vid = document.createElement('video');
+    vid.src = url;
+    vid.loop = true;
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.play();
+    callback({ img: null, video: vid, type: 'video', objectUrl: url });
+  } else {
+    loadImage(url, (img) => {
+      callback({ img: img, video: null, type: 'image', objectUrl: url });
+    });
+  }
+}
+
+/** Shared swatch definitions used by both hand rows. */
+const HAND_FILL_SWATCHES = [
+  { value: 'brand', label: 'Brand colors (random)', multicolor: true, colors: COLOR_PALETTE },
+  { value: 'standardized', label: 'Brand colors (standard)', multicolor: true, colors: Object.values(STANDARDIZED_FINGER_COLORS) },
+  ...COLOR_PALETTE.map(c => ({ value: c, color: c, label: c })),
+  { value: '#FFFFFF', color: '#FFFFFF', label: 'White' },
+  { value: '#121212', color: '#121212', label: 'Black' }
+];
+
+/** Upload a texture file, add it to the pool, and create swatches in both rows. */
+function handleTextureUpload(file, forHand) {
+  loadTextureFile(file, (result) => {
+    const idx = handFillTextures.length;
+    handFillTextures.push(result);
+    const value = 'texture:' + idx;
+    const label = file.name || 'Texture ' + (idx + 1);
+
+    function addSwatches(thumbUrl) {
+      if (cp) {
+        cp.addSwatch('handFill0', { value, label, thumbnail: thumbUrl });
+        cp.addSwatch('handFill1', { value, label, thumbnail: thumbUrl });
+      }
+      handFillSelection[forHand] = value;
+      if (!handFillSplitHands) handFillSelection[1 - forHand] = value;
+      if (cp) {
+        cp.set('handFill' + forHand, value);
+        if (!handFillSplitHands) cp.set('handFill' + (1 - forHand), value);
+      }
+    }
+
+    if (result.type === 'video' && result.video) {
+      // Capture a frame from the video as a thumbnail
+      const vid = result.video;
+      function captureFrame() {
+        const c = document.createElement('canvas');
+        c.width = vid.videoWidth || 64;
+        c.height = vid.videoHeight || 64;
+        c.getContext('2d').drawImage(vid, 0, 0, c.width, c.height);
+        addSwatches(c.toDataURL('image/jpeg', 0.6));
+      }
+      if (vid.readyState >= 2) captureFrame();
+      else vid.addEventListener('loadeddata', captureFrame, { once: true });
+    } else {
+      // Image — blob URL works directly as CSS background-image
+      addSwatches(result.objectUrl);
+    }
+  });
+}
+
 async function setup() {
   const { width, height } = calculateCanvasSize();
   createCanvas(width, height);
@@ -1418,6 +1507,82 @@ async function setup() {
               toggle: true,
               onChange: (v) => {
                 bigHands = v;
+              }
+            }
+          ]
+        },
+        {
+          type: 'fieldset',
+          legend: 'Hand Background',
+          plain: true,
+          controls: [
+            {
+              type: 'swatches',
+              id: 'handFill0',
+              value: handFillSelection[0],
+              swatches: HAND_FILL_SWATCHES,
+              customButton: true,
+              customDefault: handFillCustomColor,
+              uploadButton: true,
+              uploadAccept: 'image/*,video/*',
+              onChange: (v) => {
+                handFillSelection[0] = v === '__custom__' ? '__custom__' : v;
+                if (!handFillSplitHands) handFillSelection[1] = handFillSelection[0];
+              },
+              onCustomColor: (v) => {
+                handFillCustomColor = v;
+                handFillSelection[0] = '__custom__';
+                if (!handFillSplitHands) handFillSelection[1] = '__custom__';
+              },
+              onUpload: (file) => { handleTextureUpload(file, 0); }
+            },
+            {
+              type: 'checkbox',
+              id: 'handFillSplitHands',
+              label: 'Different for each hand',
+              value: handFillSplitHands,
+              toggle: true,
+              onChange: (v) => {
+                handFillSplitHands = v;
+                const fs = document.getElementById('handFill1-fieldset');
+                if (fs) fs.style.display = v ? '' : 'none';
+                if (!v) handFillSelection[1] = handFillSelection[0];
+              }
+            },
+            {
+              type: 'fieldset',
+              id: 'handFill1-fieldset',
+              legend: 'Right Hand',
+              hidden: true,
+              controls: [
+                {
+                  type: 'swatches',
+                  id: 'handFill1',
+                  value: handFillSelection[1],
+                  swatches: HAND_FILL_SWATCHES,
+                  customButton: true,
+                  customDefault: handFillCustomColor,
+                  uploadButton: true,
+                  uploadAccept: 'image/*,video/*',
+                  onChange: (v) => {
+                    handFillSelection[1] = v === '__custom__' ? '__custom__' : v;
+                  },
+                  onCustomColor: (v) => {
+                    handFillCustomColor = v;
+                    handFillSelection[1] = '__custom__';
+                  },
+                  onUpload: (file) => { handleTextureUpload(file, 1); }
+                }
+              ]
+            },
+            {
+              type: 'checkbox',
+              id: 'handFillScaleToHand',
+              label: 'Scale to hand size',
+              value: handFillScaleToHand,
+              toggle: true,
+              onChange: (v) => {
+                handFillScaleToHand = v;
               }
             }
           ]
@@ -1572,6 +1737,8 @@ async function setup() {
       ]
     });
     backgroundMode = cp.values.bgMode;
+    handFillSelection[0] = cp.values.handFill0;
+    handFillSelection[1] = cp.values.handFill1 || handFillSelection[0];
   }
 }
 
@@ -1587,6 +1754,11 @@ function windowResized() {
   handsBuffer = createGraphics(newWidth, newHeight);
   handsBuffer.image(oldBuffer, 0, 0, newWidth, newHeight);
   
+  // Invalidate per-hand buffers so they get recreated at the new size
+  for (let hi = 0; hi < 2; hi++) {
+    if (perHandBuffers[hi]) { perHandBuffers[hi].remove(); perHandBuffers[hi] = null; }
+  }
+
   // Update Paper.js hidden canvas and view size
   if (paper.view && paper.view.element) {
     paper.view.element.width = newWidth;
@@ -1609,7 +1781,9 @@ function keyPressed() {
 
 function draw() {
   drawBackgroundLayer();
-	handsBuffer.blendMode(MULTIPLY);
+	const _m0 = getHandFillMode(0), _m1 = getHandFillMode(1);
+	const _useMultiply = (_m0 === 'brand' || _m0 === 'standardized') && (_m1 === 'brand' || _m1 === 'standardized');
+	handsBuffer.blendMode(_useMultiply ? MULTIPLY : BLEND);
   
   // Manual hand detection with frame skipping (non-blocking)
   if (detector && video && video.loadedmetadata && !isDetecting) {
@@ -1713,14 +1887,103 @@ function draw() {
     }
   }
   
+  // Determine if hands need separate buffers (different textures)
+  const tex0 = getTextureForHand(0), tex1 = getTextureForHand(1);
+  const needsSplitBuffers = handFillSplitHands && (tex0 || tex1);
+
   // Clear the buffer each frame
   handsBuffer.clear();
-  
+
+  if (needsSplitBuffers) {
+    // Ensure per-hand buffers exist and are the right size
+    for (let hi = 0; hi < 2; hi++) {
+      if (!perHandBuffers[hi] || perHandBuffers[hi].width !== width || perHandBuffers[hi].height !== height) {
+        if (perHandBuffers[hi]) perHandBuffers[hi].remove();
+        perHandBuffers[hi] = createGraphics(width, height);
+      }
+      perHandBuffers[hi].clear();
+      perHandBuffers[hi].blendMode(_useMultiply ? MULTIPLY : BLEND);
+    }
+    handDrawTargets = perHandBuffers;
+  } else {
+    handDrawTargets = null;
+  }
+
   // Draw lines at each fingertip on the graphics buffer (only if enabled)
   if (enableDrawHands) {
     drawHands();
   }
-  
+  handDrawTargets = null; // reset after drawing
+
+  // Helper: resolve drawable source + dimensions from a texture entry
+  function texSrc(t) {
+    if (!t) return null;
+    if (t.type === 'video' && t.video && t.video.videoWidth > 0) {
+      return { src: t.video, w: t.video.videoWidth, h: t.video.videoHeight };
+    }
+    if (t.img && t.img.width > 0) {
+      return { src: t.img.canvas || t.img.elt || t.img, w: t.img.width, h: t.img.height };
+    }
+    return null;
+  }
+
+  // Helper: draw texture cover-fitted into a region on a canvas context
+  function drawTexCover(ctx, ts, rx, ry, rw, rh) {
+    const s = Math.max(rw / ts.w, rh / ts.h);
+    ctx.drawImage(ts.src, rx + (rw - ts.w * s) / 2, ry + (rh - ts.h * s) / 2, ts.w * s, ts.h * s);
+  }
+
+  if (needsSplitBuffers) {
+    // Each hand was drawn to its own buffer — composite texture on each, then merge
+    for (let hi = 0; hi < 2; hi++) {
+      const buf = perHandBuffers[hi];
+      const tex = getTextureForHand(hi);
+      if (tex) {
+        const ts = texSrc(tex);
+        if (ts) {
+          const ctx = buf.drawingContext;
+          ctx.save();
+          ctx.globalCompositeOperation = 'source-atop';
+          if (handFillScaleToHand && handBoundingBoxes[hi]) {
+            const bb = handBoundingBoxes[hi];
+            drawTexCover(ctx, ts, bb.x, bb.y, bb.w, bb.h);
+          } else {
+            drawTexCover(ctx, ts, 0, 0, buf.width, buf.height);
+          }
+          ctx.restore();
+        }
+      }
+      // Merge this hand's buffer onto the main handsBuffer
+      handsBuffer.image(buf, 0, 0);
+    }
+  } else {
+    // Single buffer path — composite shared texture if needed
+    const anyTexture = handNeedsTexture(0) || handNeedsTexture(1);
+    if (anyTexture) {
+      const ctx = handsBuffer.drawingContext;
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-atop';
+      const tex = tex0 || tex1;
+      const ts = texSrc(tex);
+      if (ts) {
+        if (handFillScaleToHand && handBoundingBoxes.length > 0) {
+          // Fit to combined bounding box of all hands
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (let hi = 0; hi < handBoundingBoxes.length; hi++) {
+            const bb = handBoundingBoxes[hi];
+            if (!bb) continue;
+            minX = Math.min(minX, bb.x); minY = Math.min(minY, bb.y);
+            maxX = Math.max(maxX, bb.x + bb.w); maxY = Math.max(maxY, bb.y + bb.h);
+          }
+          if (minX < Infinity) drawTexCover(ctx, ts, minX, minY, maxX - minX, maxY - minY);
+        } else {
+          drawTexCover(ctx, ts, 0, 0, handsBuffer.width, handsBuffer.height);
+        }
+      }
+      ctx.restore();
+    }
+  }
+
   // Display the dots buffer on the main canvas, mirrored to match the video
   push();
   translate(width, 0);
@@ -2792,7 +3055,37 @@ function calculateNormalizeOffset(bufferedHands, layout) {
   return { offsetX: 0, offsetY: 0, hands: normalizedHands };
 }
 
+/** Get the active fill mode for a given hand index. */
+function getHandFillMode(handIndex) {
+  if (!handFillSplitHands) return handFillSelection[0];
+  return handFillSelection[handIndex] || handFillSelection[0];
+}
+
+/** Resolve the effective finger fill color based on per-hand selection. */
+function resolveFingerFillColor(paletteColor, fingerName, handIndex) {
+  const mode = getHandFillMode(handIndex);
+  if (mode === 'brand') return paletteColor;
+  if (mode === 'standardized') return STANDARDIZED_FINGER_COLORS[fingerName] || paletteColor;
+  if (mode === '__custom__') return handFillCustomColor;
+  if (typeof mode === 'string' && mode.startsWith('texture:')) return '#FFFFFF';
+  return mode; // hex color
+}
+
+/** Get the texture object for a given hand index, or null. */
+function getTextureForHand(handIndex) {
+  const mode = getHandFillMode(handIndex);
+  if (typeof mode !== 'string' || !mode.startsWith('texture:')) return null;
+  const idx = parseInt(mode.split(':')[1]);
+  return handFillTextures[idx] || null;
+}
+
+/** Check if a hand's fill mode needs texture compositing. */
+function handNeedsTexture(handIndex) {
+  return getTextureForHand(handIndex) !== null;
+}
+
 function drawHands() {
+  handBoundingBoxes = [];
   const layout = getHandTrackingLayout();
   const mlCanvasScale = (layout.sx + layout.sy) * 0.5;
 
@@ -2856,10 +3149,12 @@ function drawHands() {
   for (let i = 0; i < bufferedHands.length; i++) {
     let hand = bufferedHands[i];
     let landmarks = hand.landmarks;
+    // Resolve draw target for this hand (per-hand buffer or shared handsBuffer)
+    const hBuf = (handDrawTargets && handDrawTargets[i]) ? handDrawTargets[i] : handsBuffer;
     const bigHandsPivot = bigHands
       ? handLandmarksCanvasCentroid(landmarks, layout, normalizeOffsetX, normalizeOffsetY)
       : null;
-    
+
     // Assign colors to fingers for this hand if not already assigned
     assignFingerColors(i);
     
@@ -2987,7 +3282,8 @@ function drawHands() {
       let strokeWeight = cp ? cp.values.strokeWeight : 50;
       
       // Get the assigned color for this finger (monochrome = black)
-      let fingerColor = multicolor ? fingerColors[i][finger] : '#000000';
+      let basePaletteColor = multicolor ? fingerColors[i][finger] : '#000000';
+      let fingerColor = resolveFingerFillColor(basePaletteColor, finger, i);
       let c = color(fingerColor);
       
       // Draw rectangle from base to tip (or circle if finger is too short, or bezier if bent)
@@ -3314,22 +3610,43 @@ function drawHands() {
           let fullRadius = paperShapes[i][key].fullCircleRadius || (rectWidth * 1.28 / 2);
           // Get the last bezier path for transition calculation
           let lastBezierPath = paperShapes[i][key].lastBezierPath || null;
-          exportPaperCircleToP5(paperShape, c, handsBuffer, rectBezOrCircle, fullRadius, rectWidth, lastBezierPath, drawBaseX, drawBaseY, drawTipX, drawTipY);
+          exportPaperCircleToP5(paperShape, c, hBuf, rectBezOrCircle, fullRadius, rectWidth, lastBezierPath, drawBaseX, drawBaseY, drawTipX, drawTipY);
         } else if (currentShapeType === 'bezier') {
           // Check if we should draw transition rectangle instead (0.3 to 0.5)
           if (rectBezOrCircle >= 0.3 && rectBezOrCircle < 0.5) {
             let fullRadius = paperShapes[i][key].fullCircleRadius || (rectWidth * 1.28 / 2);
-            exportTransitionRectangleToP5(c, handsBuffer, rectBezOrCircle, rectWidth, drawBaseX, drawBaseY, drawTipX, drawTipY, fullRadius);
+            exportTransitionRectangleToP5(c, hBuf, rectBezOrCircle, rectWidth, drawBaseX, drawBaseY, drawTipX, drawTipY, fullRadius);
           } else {
-            exportPaperBezierToP5(paperShape, c, rectWidth, handsBuffer, rectBezOrCircle, drawBaseX, drawBaseY, drawTipX, drawTipY);
+            exportPaperBezierToP5(paperShape, c, rectWidth, hBuf, rectBezOrCircle, drawBaseX, drawBaseY, drawTipX, drawTipY);
           }
         } else if (currentShapeType === 'rect') {
-          exportPaperRectangleToP5(paperShape, c, handsBuffer, paperShapes[i][key].rectWidth, paperShapes[i][key].rectHeight);
+          exportPaperRectangleToP5(paperShape, c, hBuf, paperShapes[i][key].rectWidth, paperShapes[i][key].rectHeight);
         }
       }
     }
 
-    
+    // Compute bounding box for this hand from actual Paper.js shape bounds (for texture scaling)
+    if (paperShapes[i]) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (let fk in paperShapes[i]) {
+        const sd = paperShapes[i][fk];
+        if (!sd || !sd.shape) continue;
+        // For bezier paths, the visual extent includes the stroke width
+        const sw = sd.strokeWidth || 0;
+        const half = sw / 2;
+        const b = sd.shape.strokeBounds || sd.shape.bounds;
+        if (b) {
+          minX = Math.min(minX, b.left - half);
+          minY = Math.min(minY, b.top - half);
+          maxX = Math.max(maxX, b.right + half);
+          maxY = Math.max(maxY, b.bottom + half);
+        }
+      }
+      if (minX < Infinity) {
+        handBoundingBoxes[i] = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+      }
+    }
+
     // Compute intersections for all pairs of finger shapes for this hand (only if enabled)
     if (showIntersections) {
       const fingerNames = Object.keys(FINGER_TIPS);
@@ -3384,7 +3701,7 @@ function drawHands() {
                 }
                 
                 // Export intersection to p5 with mapped color
-                exportPaperPathToP5(intersection, handsBuffer, intersectionColor);
+                exportPaperPathToP5(intersection, hBuf, intersectionColor);
                 
                 // Clean up cloned paths
                 path1Clone.remove();
