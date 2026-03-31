@@ -2119,6 +2119,7 @@ function toggleWidgetPreview(on) {
       poses: widgetPoses,
       size: 150,
       defaultPose: Object.keys(widgetPoses)[0],
+      pressPose: widgetPoses.grab ? 'grab' : null,
       cursor: true,
       lerpSpeed: 0.12,
       cursorSmooth: 0.3

@@ -308,6 +308,7 @@
     var hideCursor = opts.cursor !== undefined ? opts.cursor : true;
     var poseSpeed = opts.lerpSpeed || 0.12;
     var cursorSmooth = opts.cursorSmooth || 0.3;
+    var pressPose = opts.pressPose || null; // pose to show on mousedown/touchstart
 
     // Normalize all poses to keyed maps and compute per-pose scale
     var poses = {};
@@ -331,6 +332,7 @@
     var targetPoseData = currentPoseData;
     var poseT = 1.0;
     var renderPose = currentPoseData;
+    var isPressed = false;
 
     // Hover rules: array of { selector, poseName }
     var hoverRules = [];
@@ -422,6 +424,21 @@
     document.documentElement.addEventListener('mouseleave', onMouseLeave);
     document.documentElement.addEventListener('mouseenter', onMouseEnter);
 
+    function onPressStart() {
+      isPressed = true;
+      if (pressPose && poses[pressPose] && !hoverActivePose) {
+        transitionTo(pressPose);
+      }
+    }
+    function onPressEnd() {
+      isPressed = false;
+      if (pressPose && !hoverActivePose) {
+        transitionTo(targetPoseName);
+      }
+    }
+    document.addEventListener('mousedown', onPressStart);
+    document.addEventListener('mouseup', onPressEnd);
+
     // -----------------------------------------------------------------------
     // Hover detection
     // -----------------------------------------------------------------------
@@ -447,6 +464,8 @@
         hoverActivePose = matched;
         if (matched) {
           transitionTo(matched);
+        } else if (isPressed && pressPose && poses[pressPose]) {
+          transitionTo(pressPose);
         } else {
           transitionTo(targetPoseName);
         }
@@ -548,6 +567,8 @@
         document.removeEventListener('touchend', onTouchEnd);
         document.documentElement.removeEventListener('mouseleave', onMouseLeave);
         document.documentElement.removeEventListener('mouseenter', onMouseEnter);
+        document.removeEventListener('mousedown', onPressStart);
+        document.removeEventListener('mouseup', onPressEnd);
         if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
         if (cursorStyle && cursorStyle.parentNode) cursorStyle.parentNode.removeChild(cursorStyle);
       },
