@@ -29,31 +29,6 @@
     return OVERLAP_COLORS[key] || null;
   }
 
-  function hexToRgb(hex) {
-    var n = parseInt(hex.replace('#', ''), 16);
-    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-  }
-
-  // Precompute multiply-result → brand-overlap-color lookup (built once)
-  var MULTIPLY_LOOKUP = null;
-  function getMultiplyLookup() {
-    if (MULTIPLY_LOOKUP) return MULTIPLY_LOOKUP;
-    MULTIPLY_LOOKUP = [];
-    for (var key in OVERLAP_COLORS) {
-      var parts = key.split(',');
-      if (parts.length !== 2) continue;
-      var c1 = hexToRgb(parts[0]), c2 = hexToRgb(parts[1]);
-      var brand = hexToRgb(OVERLAP_COLORS[key]);
-      MULTIPLY_LOOKUP.push({
-        mr: Math.round(c1.r * c2.r / 255),
-        mg: Math.round(c1.g * c2.g / 255),
-        mb: Math.round(c1.b * c2.b / 255),
-        br: brand.r, bg: brand.g, bb: brand.b
-      });
-    }
-    return MULTIPLY_LOOKUP;
-  }
-
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -66,17 +41,6 @@
     var dx = x2 - x1;
     var dy = y2 - y1;
     return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  function rotatePoint(px, py, cx, cy, angle) {
-    var cos = Math.cos(angle);
-    var sin = Math.sin(angle);
-    var dx = px - cx;
-    var dy = py - cy;
-    return {
-      x: cx + dx * cos - dy * sin,
-      y: cy + dx * sin + dy * cos
-    };
   }
 
   // De Casteljau evaluation of cubic bezier at parameter t

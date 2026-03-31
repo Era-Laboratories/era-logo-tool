@@ -11,7 +11,6 @@ let lastDetectedHands = []; // Store last frame with actual detection
 let skippedFramesCount = 0; // Count consecutive skipped frames
 let handsBuffer;
 let lerpedPositions = {}; // Store lerped positions for each hand and finger
-let previousPositions = {}; // Store previous positions for drawing lines
 let lerpedBasePositions = {}; // Store lerped base positions for rectangle mode
 let lerpedPipPositions = {}; // Store lerped PIP positions for bezier curve mode
 let positionVelocities = {}; // Store velocity vectors for each hand and finger position (for anti-jitter)
@@ -74,7 +73,6 @@ function handLandmarksCanvasCentroid(landmarks, layout, normalizeOffsetX, normal
   };
 }
 
-let handOrientation = 0; // 2D angle in degrees from wrist (0) to middle MCP (9)
 const handBufferFrames = 0; // Number of frames to delay the visual (0 = no delay, use most recent hand data)
 
 // Save/export state
@@ -174,39 +172,6 @@ let frameBufferDebugInfo = {
   interpolationFactor: 0,
   handsReturned: 0
 };
-
-// // v2 - ipods raw
-// const COLOR_PALETTE = [
-//   "#70E6B2", // mint green
-//   "#78A699", // dark teal
-//   "#86CAF1", // light blue
-//   "#BFFF10", // neon lime
-//   "#CA9DD4", // lavender
-//   "#F5F500", // soft yellow
-//   "#F945A6", // hot pink
-//   "#FFD263"  // warm yellow / amber
-// ];
-
-// // v3a - removed colors they dont like
-// const COLOR_PALETTE = [
-//   "#70E6B2", // mint green
-//   "#86CAF1", // light blue
-//   "#BFFF10", // neon lime
-//   "#CA9DD4", // lavender
-//   "#F5F500", // soft yellow
-//   "#F945A6", // hot pink
-// ];
-
-// v3b - added bright red/orange
-// const COLOR_PALETTE = [
-//   "#70E6B2", // mint green
-//   "#86CAF1", // light blue
-//   "#BFFF10", // neon lime
-//   "#CA9DD4", // lavender
-//   "#F5F500", // soft yellow
-//   "#F945A6", // hot pink
-//   "#FF643D"  // bright red/orange
-// ];
 
 // v3c - overall more saturated
 const COLOR_PALETTE = [
@@ -764,25 +729,6 @@ function percentile(arr, p) {
  */
 function emaNext(prev, next, alpha) {
   return prev + alpha * (next - prev);
-}
-
-/**
- * Create an EMA tracker object
- * @param {number} alpha - Smoothing factor (0-1)
- * @param {number} initialValue - Initial value
- * @returns {Object} EMA tracker with { value, update(x), setAlpha(a) }
- */
-function createEMA(alpha, initialValue = 0) {
-  return {
-    value: initialValue,
-    update: function(x) {
-      this.value = emaNext(this.value, x, alpha);
-      return this.value;
-    },
-    setAlpha: function(a) {
-      alpha = a;
-    }
-  };
 }
 
 /**
@@ -2975,18 +2921,6 @@ function windowResized() {
   }
 }
 
-function keyPressed() {
-  // Toggle debug controls visibility with 'd' key — disabled
-  // if (key === 'd' || key === 'D') {
-  //   debugMode = !debugMode;
-  //   const debugContainer = document.getElementById('debug-controls');
-  //   if (debugContainer) {
-  //     const isVisible = debugContainer.style.display !== 'none';
-  //     debugContainer.style.display = isVisible ? 'none' : 'block';
-  //   }
-  // }
-}
-
 function draw() {
   drawBackgroundLayer();
 	const _m0 = getHandFillMode(0), _m1 = getHandFillMode(1);
@@ -2997,10 +2931,6 @@ function draw() {
   
   // Manual hand detection with frame skipping (non-blocking)
   if (detector && video && video.loadedmetadata && !isDetecting) {
-    const skipPercent = cp ? cp.values.skipFrames : 0;
-    const shouldSkip = skipPercent > 0 && Math.random() * 100 < skipPercent;
-    
-    if (1) {
       isDetecting = true;
       const vel = video.elt;
       mlInputCtx.drawImage(vel, 0, 0, ML_INPUT_W, ML_INPUT_H);
@@ -3086,15 +3016,6 @@ function draw() {
         addToHandBuffer(hands);
         isDetecting = false;
       });
-    } else {
-      // Skip this frame - increment counter, will interpolate when we get next detection
-      skippedFramesCount++;
-      // Don't add to buffer yet - we'll add interpolated frames when we get the next detection
-      // But we still need to maintain buffer timing, so add placeholder (will be replaced)
-      // Actually, we need to add something to maintain the frame delay, so add current hands
-      // The interpolated frames will be added before the next detection
-      addToHandBuffer(hands);
-    }
   }
   
   // Determine if hands need separate buffers (different textures)
@@ -3234,9 +3155,6 @@ function draw() {
   if (debugMode) {
     drawFramerate();
   }
-  
-  // Real-time hand detection indicator (red dot when no hands) — off
-  // drawRealTimeHandIndicator();
   
   updateCalibrationOverlay();
   
@@ -3570,29 +3488,6 @@ function drawFramerate() {
   pop();
 }
 
-function drawRealTimeHandIndicator() {
-  // Check if real-time hand data (not buffered) has no hands
-  const noHandDetected = hands.length === 0;
-  
-  if (noHandDetected) {
-    // Position beneath the top left debug info area
-    const padding = 20;
-    const x = padding;
-    
-    // Estimate debug info height (approximately 5-7 lines * lineHeight + padding)
-    // This positions it below where the debug info would be
-    const estimatedDebugHeight = 150; // Approximate height of debug info box
-    const y = padding + estimatedDebugHeight + 15; // 15px spacing below debug info
-    
-    // Draw red dot
-    push();
-    fill(255, 0, 0); // Red
-    noStroke();
-    circle(x + 10, y, 8); // 8px diameter dot
-    pop();
-  }
-}
-
 function updateCalibrationOverlay() {
   const root = document.getElementById('calibration-overlay');
   const progressEl = document.getElementById('calibration-progress');
@@ -3817,26 +3712,6 @@ function calculateBezierControlPoints(drawBaseX, drawBaseY, drawTipX, drawTipY, 
   }
   
   return { cp1X, cp1Y, cp2X, cp2Y };
-}
-
-// Helper function to export Paper.js rectangle to p5
-function exportPaperRectangleToP5(rectShape, colorObj, buffer, storedWidth, storedHeight) {
-  const bounds = rectShape.bounds;
-  const center = bounds.center;
-  const angle = rectShape.rotation * (Math.PI / 180); // Convert degrees to radians for p5
-  // Use stored dimensions instead of bounds (bounds are AABB after rotation)
-  const rectHeight = storedHeight || bounds.height;
-  const rectWidth = storedWidth || bounds.width;
-  
-  buffer.push();
-  buffer.translate(center.x, center.y);
-  buffer.rotate(angle);
-  buffer.fill(red(colorObj), green(colorObj), blue(colorObj));
-  buffer.noStroke();
-  buffer.rectMode(CENTER);
-  buffer.rect(0, 0, rectHeight, rectWidth);
-  buffer.rectMode(CORNER);
-  buffer.pop();
 }
 
 // Helper function to export transition rectangle (0.3 to 0.5)
@@ -4119,65 +3994,6 @@ function shapeToPath(shape, strokeWidth, lowRes) {
   return null;
 }
 
-// Helper function to export Paper.js path (from intersection) to p5 with specified fill color
-function exportPaperPathToP5(pathShape, buffer, fillColor) {
-  if (!pathShape || !pathShape.segments || pathShape.segments.length < 2) return;
-  
-  // Use provided color or default to black
-  const fillColorHex = fillColor || '#000000';
-  const c = color(fillColorHex);
-  buffer.fill(red(c), green(c), blue(c));
-  buffer.noStroke();
-  
-  // Convert Paper.js path to p5 shape
-  // Use bezierVertex for curves if handles exist, otherwise use regular vertex
-  buffer.beginShape();
-  
-  const segments = pathShape.segments;
-  const isClosed = pathShape.closed;
-  
-  // Start with first vertex
-  buffer.vertex(segments[0].point.x, segments[0].point.y);
-  
-  // Process segments to add curves or vertices
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    const nextIndex = isClosed ? (i + 1) % segments.length : i + 1;
-    
-    // Skip if we've reached the end (for open paths)
-    if (nextIndex >= segments.length) break;
-    
-    const nextSeg = segments[nextIndex];
-    
-    // Check if this segment has curve handles
-    const hasCurve = seg.handleOut && (Math.abs(seg.handleOut.x) > 0.001 || Math.abs(seg.handleOut.y) > 0.001) &&
-                     nextSeg.handleIn && (Math.abs(nextSeg.handleIn.x) > 0.001 || Math.abs(nextSeg.handleIn.y) > 0.001);
-    
-    if (hasCurve) {
-      // Use bezier vertex for curves
-      // Control point 1: current point + handleOut
-      const cp1x = seg.point.x + seg.handleOut.x;
-      const cp1y = seg.point.y + seg.handleOut.y;
-      // Control point 2: next point + handleIn
-      const cp2x = nextSeg.point.x + nextSeg.handleIn.x;
-      const cp2y = nextSeg.point.y + nextSeg.handleIn.y;
-      // End point: next point
-      const endx = nextSeg.point.x;
-      const endy = nextSeg.point.y;
-      buffer.bezierVertex(cp1x, cp1y, cp2x, cp2y, endx, endy);
-    } else {
-      // Regular vertex
-      buffer.vertex(nextSeg.point.x, nextSeg.point.y);
-    }
-  }
-  
-  if (pathShape.closed) {
-    buffer.endShape(CLOSE);
-  } else {
-    buffer.endShape();
-  }
-}
-
 // Helper function to calculate normalization offset (layout from getHandTrackingLayout)
 function calculateNormalizeOffset(bufferedHands, layout) {
   if (!normalizeHands || bufferedHands.length === 0) {
@@ -4380,18 +4196,6 @@ function drawHands() {
     updateHandCloseness(bufferedHands[i].landmarks, i);
   }
   
-  // Calculate hand orientation for first hand (for backward compatibility)
-  if (bufferedHands.length > 0) {
-    const landmarks = bufferedHands[0].landmarks;
-    const wrist = landmarks[0]; // Node 0: wrist
-    const middleMCP = landmarks[9]; // Node 9: middle MCP
-    // Negate dx to account for horizontal mirroring of video display
-    const dx = -(middleMCP[0] - wrist[0]);
-    const dy = middleMCP[1] - wrist[1];
-    // Calculate angle in degrees (0 = right, 90 = up, -90 = down)
-    handOrientation = degrees(atan2(dy, dx));
-  }
-  
   // Decay closeness for hands that are no longer detected
   for (let handIndex in handClosenessState) {
     const handIdx = parseInt(handIndex);
@@ -4415,9 +4219,6 @@ function drawHands() {
     // Initialize positions for this hand if not exists
     if (!lerpedPositions[i]) {
       lerpedPositions[i] = {};
-    }
-    if (!previousPositions[i]) {
-      previousPositions[i] = {};
     }
     if (!lerpedBasePositions[i]) {
       lerpedBasePositions[i] = {};
@@ -4470,7 +4271,6 @@ function drawHands() {
       let key = finger;
       if (!lerpedPositions[i][key]) {
         lerpedPositions[i][key] = { x: targetTipX, y: targetTipY };
-        previousPositions[i][key] = { x: targetTipX, y: targetTipY };
       }
       if (!lerpedBasePositions[i][key]) {
         lerpedBasePositions[i][key] = { x: targetBaseX, y: targetBaseY };
@@ -4873,8 +4673,6 @@ function drawHands() {
           } else {
             exportPaperBezierToP5(paperShape, c, rectWidth, hBuf, rectBezOrCircle, drawBaseX, drawBaseY, drawTipX, drawTipY);
           }
-        } else if (currentShapeType === 'rect') {
-          exportPaperRectangleToP5(paperShape, c, hBuf, paperShapes[i][key].rectWidth, paperShapes[i][key].rectHeight);
         }
       }
     }
@@ -4906,7 +4704,6 @@ function drawHands() {
   for (let handIndex in lerpedPositions) {
     if (parseInt(handIndex) >= bufferedHands.length) {
       delete lerpedPositions[handIndex];
-      delete previousPositions[handIndex];
       delete lerpedBasePositions[handIndex];
       delete lerpedPipPositions[handIndex];
       delete positionVelocities[handIndex];
@@ -5268,7 +5065,7 @@ function drawDebugInfo() {
     // Position text along the angle line, offset slightly
     const textOffsetX = cos(angle) * (lineLength + 20);
     const textOffsetY = sin(angle) * (lineLength + 20);
-    text(handOrientation.toFixed(1) + "°", wristX + textOffsetX, wristY + textOffsetY);
+    text(degrees(angle).toFixed(1) + "°", wristX + textOffsetX, wristY + textOffsetY);
     pop();
   }
 }
