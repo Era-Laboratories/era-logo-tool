@@ -258,32 +258,40 @@
     return result;
   }
 
-  /** Flatten a pose from nested {fingers:{handIdx:{fingerName:params}}} to a flat array of params.
-   *  Also handles already-flat arrays (pass-through). */
-  function flattenPose(pose) {
-    if (!pose) return [];
-    if (Array.isArray(pose)) return pose; // already flat
-    var arr = [];
+  /** Convert a pose to a keyed map: { "handIdx:fingerName": params, ... }.
+   *  Preserves finger identity for correct lerping between poses. */
+  function normalizePose(pose) {
+    if (!pose) return {};
+    var map = {};
     var fingers = pose.fingers || pose;
+    // Handle nested {handIdx: {fingerName: params}}
     for (var hi in fingers) {
       if (typeof fingers[hi] !== 'object') continue;
       for (var fn in fingers[hi]) {
         var p = fingers[hi][fn];
         if (p && typeof p.tipX === 'number') {
-          arr.push(p);
+          map[hi + ':' + fn] = p;
         }
       }
     }
-    return arr;
+    return map;
   }
 
+  /** Lerp between two keyed pose maps. Fingers present in both are interpolated;
+   *  fingers only in one are included as-is. */
   function lerpPose(poseA, poseB, t) {
     if (!poseA) return poseB;
     if (!poseB) return poseA;
-    var result = [];
-    var count = Math.min(poseA.length, poseB.length);
-    for (var i = 0; i < count; i++) {
-      result.push(lerpFinger(poseA[i], poseB[i], t));
+    var result = {};
+    // Union of all keys
+    var keys = {};
+    var k;
+    for (k in poseA) keys[k] = true;
+    for (k in poseB) keys[k] = true;
+    for (k in keys) {
+      var a = poseA[k], b = poseB[k];
+      if (a && b) result[k] = lerpFinger(a, b, t);
+      else result[k] = a || b;
     }
     return result;
   }
@@ -301,12 +309,12 @@
     var poseSpeed = opts.lerpSpeed || 0.12;
     var cursorSmooth = opts.cursorSmooth || 0.3;
 
-    // Flatten all poses to arrays and compute per-pose scale
+    // Normalize all poses to keyed maps and compute per-pose scale
     var poses = {};
     var poseScales = {};
     for (var pn in rawPoses) {
       var rp = rawPoses[pn];
-      poses[pn] = flattenPose(rp);
+      poses[pn] = normalizePose(rp);
       poseScales[pn] = (rp && rp.refSize) ? rp.refSize : 200;
     }
 
@@ -456,7 +464,7 @@
       var newTarget = poses[name];
       if (!newTarget) return;
       // Snapshot the current rendered pose as the source
-      currentPoseData = renderPose ? renderPose.slice() : targetPoseData;
+      currentPoseData = renderPose ? JSON.parse(JSON.stringify(renderPose)) : targetPoseData;
       targetPoseData = newTarget;
       activePoseName = name;
       poseT = 0;
@@ -501,8 +509,8 @@
       var refSize = poseScales[activePoseName] || 200;
       var scale = size / refSize;
       ctx.translate(size / 2, size / 2);
-      for (var i = 0; i < renderPose.length; i++) {
-        renderFinger(ctx, renderPose[i], scale);
+      for (var fk in renderPose) {
+        renderFinger(ctx, renderPose[fk], scale);
       }
       ctx.restore();
     }

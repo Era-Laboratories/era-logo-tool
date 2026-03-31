@@ -2064,13 +2064,15 @@ function captureWidgetPose(name) {
         rectOrBez: sd.rectOrBez || 0,
         color: sd.color || '#000000'
       };
-      cx += tip.x; cy += tip.y; count++;
+      // Include both tip and base in centroid for better centering
+      cx += tip.x + db.x; cy += tip.y + db.y; count += 2;
     }
   }
   if (count === 0) return;
   cx /= count; cy /= count;
-  // Second pass: offset by centroid + compute refSize
+  // Second pass: offset by centroid + compute refSize with dynamic padding
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let maxRW = 0;
   for (let i in raw) {
     pose.fingers[i] = {};
     for (let finger in raw[i]) {
@@ -2089,9 +2091,10 @@ function captureWidgetPose(name) {
       minY = Math.min(minY, f.tipY, f.baseY);
       maxX = Math.max(maxX, f.tipX, f.baseX);
       maxY = Math.max(maxY, f.tipY, f.baseY);
+      if (r.rectWidth > maxRW) maxRW = r.rectWidth;
     }
   }
-  pose.refSize = Math.max(maxX - minX, maxY - minY) + 60; // padding for stroke width
+  pose.refSize = Math.max(maxX - minX, maxY - minY) + maxRW * 3;
   widgetPoses[name] = pose;
   updatePoseList();
 }
