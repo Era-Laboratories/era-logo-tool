@@ -1493,31 +1493,29 @@ function exportSVG() {
       } catch (e) { /* skip invalid intersection */ }
     }
   }
-  // Mirror horizontally to match the displayed output (canvas is mirrored)
-  group.scale(-1, 1);
-  group.translate(-paper.view.size.width, 0);
-  const svgNode = group.exportSVG({ asString: false });
-  // Wrap in an <svg> root with viewBox
+  // Export the group as SVG (no Paper.js transforms — mirroring done in SVG)
+  // Apply mirror transform via an SVG <g> wrapper instead of Paper.js transforms
+  // (Paper.js exportSVG can lose transforms when children are extracted)
+  const svgStr = group.exportSVG({ asString: true });
   const svgRoot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svgRoot.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
   svgRoot.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
   svgRoot.setAttribute('width', width);
   svgRoot.setAttribute('height', height);
-  // Add background
+  // Background
   const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   bg.setAttribute('width', '100%');
   bg.setAttribute('height', '100%');
   bg.setAttribute('fill', '#ffffff');
   svgRoot.appendChild(bg);
-  // Append the exported shapes
-  if (svgNode.tagName === 'g') {
-    while (svgNode.firstChild) svgRoot.appendChild(svgNode.firstChild);
-  } else {
-    svgRoot.appendChild(svgNode);
-  }
+  // Mirror wrapper — flip horizontally to match the displayed view
+  const mirrorG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  mirrorG.setAttribute('transform', 'scale(-1,1) translate(-' + width + ',0)');
+  mirrorG.innerHTML = svgStr;
+  svgRoot.appendChild(mirrorG);
   // Download
-  const svgStr = new XMLSerializer().serializeToString(svgRoot);
-  const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+  const svgOutput = new XMLSerializer().serializeToString(svgRoot);
+  const blob = new Blob([svgOutput], { type: 'image/svg+xml' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
