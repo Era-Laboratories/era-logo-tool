@@ -606,7 +606,10 @@
   }
 
   function appendSection(host, spec) {
-    if (spec.label) el(host, 'div', 'cotton-cp-section', spec.label);
+    if (spec.label != null) {
+      var div = el(host, 'div', 'cotton-cp-section', spec.label);
+      if (spec.id) div.id = spec.id;
+    }
   }
 
   function appendControl(host, spec, panel, listeners) {

@@ -29,6 +29,7 @@ body {
   position: fixed;
   top: 20px;
   right: 20px;
+  bottom: 20px;
   max-width: 300px;
   padding: 20px;
   z-index: 1000;
@@ -38,6 +39,8 @@ body {
   -webkit-backdrop-filter: blur(7px);
   box-shadow: 0 1px 7px rgba(0, 0, 0, 0.07);
   box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* Figma Frame 16 tokens */
@@ -577,4 +580,104 @@ body {
 
 .cotton-cp-actions {
   margin-top: 0;
+}
+
+/* Tabs */
+.cotton-cp-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 18px;
+}
+
+.cotton-cp-tab {
+  padding: 5px 10px;
+  border: 0.5px solid var(--cp-line);
+  border-radius: var(--cp-radius-pill);
+  background: var(--cp-track);
+  color: var(--cp-fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  line-height: 1;
+}
+
+.cotton-cp-tab:hover {
+  background: #e8e8e8;
+}
+
+.cotton-cp-tab--active {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+
+.cotton-cp-tab--active:hover {
+  background: #222;
+}
+
+/* Hide legends on single-section tabs — tab bar already shows the name */
+#tab-export > .cotton-cp-legend,
+#tab-anim > .cotton-cp-legend {
+  display: none;
+}
+
+/* Animation timeline */
+.anim-timeline-wrap {
+  margin-top: 8px;
+}
+
+.anim-timeline-track {
+  position: relative;
+  height: 32px;
+  background: var(--cp-track, #f1f1f1);
+  border: 0.5px solid var(--cp-line, #dfdfdf);
+  border-radius: var(--cp-radius-pill, 10px);
+  cursor: default;
+}
+
+.anim-timeline-dot {
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #000;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  user-select: none;
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+  transition: box-shadow 0.12s;
+}
+
+.anim-timeline-dot:hover {
+  box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+}
+
+.anim-timeline-dot:active {
+  cursor: grabbing;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+}
+
+.anim-timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #F945A6;
+  transform: translateX(-50%);
+  z-index: 1;
+  border-radius: 1px;
+  pointer-events: none;
+  left: 0;
 }

@@ -77,10 +77,25 @@ function handLandmarksCanvasCentroid(landmarks, layout, normalizeOffsetX, normal
 let handOrientation = 0; // 2D angle in degrees from wrist (0) to middle MCP (9)
 const handBufferFrames = 0; // Number of frames to delay the visual (0 = no delay, use most recent hand data)
 
-// Save PNG countdown state
+// Save/export state
 let saveCountdown = -1; // -1 means not counting down, >= 0 means counting down
 let saveCountdownStartTime = 0;
 let saveCountdownDelay = 3; // Default delay in seconds
+let savePendingAction = null; // 'png' | 'svg' | 'record' — what to do when countdown finishes
+
+// Video recording state
+let mediaRecorder = null;
+let recordedChunks = [];
+let isRecording = false;
+let recordDuration = 5; // seconds
+let recordStartTime = 0;
+
+// Animation keyframe state
+let animKeyframes = []; // [{id, t (0-1), fingers: {handIdx: {fingerName: {pathData, color}}}}]
+let animTotalDuration = 2; // seconds
+let animPreview = false; // when true, plays back keyframes instead of live hands
+let animPreviewStart = 0; // millis() when preview started
+const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 
 // Paper.js shape storage - stores Paper.js shapes per hand and finger
 let paperShapes = {}; // Structure: paperShapes[handIndex][fingerName] = { shape: paperObject, type: 'rect'|'circle'|'bezier', color: colorString }
@@ -1414,6 +1429,609 @@ function handleTextureUpload(file, forHand) {
   });
 }
 
+/** Export the current hand shapes as an SVG file. */
+function exportSVG() {
+  const group = new paper.Group();
+  // Gather all visible finger shapes across all hands
+  for (let handIdx in paperShapes) {
+    for (let fingerName in paperShapes[handIdx]) {
+      const sd = paperShapes[handIdx][fingerName];
+      if (!sd || !sd.shape) continue;
+      const path = shapeToPath(sd.shape, sd.strokeWidth);
+      if (!path) continue;
+      const clone = path.clone();
+      clone.fillColor = sd.color || '#000000';
+      clone.strokeColor = null;
+      group.addChild(clone);
+    }
+  }
+  // Mirror horizontally to match the displayed output (canvas is mirrored)
+  group.scale(-1, 1);
+  group.translate(-paper.view.size.width, 0);
+  const svgNode = group.exportSVG({ asString: false });
+  // Wrap in an <svg> root with viewBox
+  const svgRoot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svgRoot.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  svgRoot.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+  svgRoot.setAttribute('width', width);
+  svgRoot.setAttribute('height', height);
+  // Add background
+  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  bg.setAttribute('width', '100%');
+  bg.setAttribute('height', '100%');
+  bg.setAttribute('fill', '#ffffff');
+  svgRoot.appendChild(bg);
+  // Append the exported shapes
+  if (svgNode.tagName === 'g') {
+    while (svgNode.firstChild) svgRoot.appendChild(svgNode.firstChild);
+  } else {
+    svgRoot.appendChild(svgNode);
+  }
+  // Download
+  const svgStr = new XMLSerializer().serializeToString(svgRoot);
+  const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'hand-tracking.svg';
+  a.click();
+  URL.revokeObjectURL(url);
+  // Clean up
+  group.remove();
+}
+
+/** Start recording the canvas as a WebM video. */
+function startRecording() {
+  const canvas = document.querySelector('canvas');
+  const stream = canvas.captureStream(30); // 30 fps
+  recordedChunks = [];
+  const mimeTypes = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  let mime = '';
+  for (const m of mimeTypes) {
+    if (MediaRecorder.isTypeSupported(m)) { mime = m; break; }
+  }
+  mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
+  };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'hand-tracking.webm';
+    a.click();
+    URL.revokeObjectURL(url);
+    isRecording = false;
+    recordedChunks = [];
+    const btn = document.getElementById('record-button');
+    if (btn) btn.textContent = 'Record Video';
+  };
+  mediaRecorder.start();
+  isRecording = true;
+  recordStartTime = millis();
+  const btn = document.getElementById('record-button');
+  if (btn) btn.textContent = 'Stop Recording';
+}
+
+/** Stop recording and trigger download. */
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+}
+
+/** Compute drawBase from tip so that dist(drawBase, drawTip) = 2 * rectWidth.
+ *  Matches the live pipeline adjustment at lines 4036-4059. */
+function computeDrawBase(tipX, tipY, baseX, baseY, rectWidth) {
+  const dx = tipX - baseX, dy = tipY - baseY;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 0.001) return { x: baseX, y: baseY };
+  const dirX = dx / len, dirY = dy / len;
+  const targetLen = 2 * rectWidth;
+  return { x: tipX - dirX * targetLen, y: tipY - dirY * targetLen };
+}
+
+/** Compute bezier control points with 30-degree rotation (matches calculateBezierControlPoints). */
+function computeRotatedControlPoints(drawBaseX, drawBaseY, drawTipX, drawTipY, pipX, pipY) {
+  const baseToPipX = pipX - drawBaseX, baseToPipY = pipY - drawBaseY;
+  const tipToPipX = pipX - drawTipX, tipToPipY = pipY - drawTipY;
+  let cp1X = drawBaseX + baseToPipX * 0.7;
+  let cp1Y = drawBaseY + baseToPipY * 0.7;
+  let cp2X = drawTipX + tipToPipX * 0.6;
+  let cp2Y = drawTipY + tipToPipY * 0.6;
+
+  const baseToTipX = drawTipX - drawBaseX, baseToTipY = drawTipY - drawBaseY;
+  const btLen = Math.sqrt(baseToTipX * baseToTipX + baseToTipY * baseToTipY);
+  if (btLen > 0.001) {
+    const btNX = baseToTipX / btLen, btNY = baseToTipY / btLen;
+    const perpX = -btNY, perpY = btNX;
+    const rot = 30 * Math.PI / 180;
+    // Rotate cp1 around base
+    let v1x = cp1X - drawBaseX, v1y = cp1Y - drawBaseY;
+    let v1Len = Math.sqrt(v1x * v1x + v1y * v1y);
+    if (v1Len > 0.001) {
+      let a1 = Math.atan2(v1y, v1x);
+      let dir1 = (v1x * perpX + v1y * perpY) >= 0 ? 1 : -1;
+      a1 += dir1 * rot;
+      cp1X = drawBaseX + Math.cos(a1) * v1Len;
+      cp1Y = drawBaseY + Math.sin(a1) * v1Len;
+    }
+    // Rotate cp2 around tip
+    let v2x = cp2X - drawTipX, v2y = cp2Y - drawTipY;
+    let v2Len = Math.sqrt(v2x * v2x + v2y * v2y);
+    if (v2Len > 0.001) {
+      let a2 = Math.atan2(v2y, v2x);
+      let dir2 = (v2x * perpX + v2y * perpY) >= 0 ? -1 : 1;
+      a2 += dir2 * rot;
+      cp2X = drawTipX + Math.cos(a2) * v2Len;
+      cp2Y = drawTipY + Math.sin(a2) * v2Len;
+    }
+  }
+  return { cp1X, cp1Y, cp2X, cp2Y };
+}
+
+/** Capture the current hand shapes as an animation keyframe.
+ *  Stores the adjusted draw positions + shape params. */
+function captureKeyframe() {
+  const kf = { id: Date.now(), t: 0, hands: {} };
+  let hasData = false;
+  for (let i in paperShapes) {
+    kf.hands[i] = {};
+    for (let finger in paperShapes[i]) {
+      const sd = paperShapes[i][finger];
+      if (!sd || !sd.shape) continue;
+      const tip = lerpedPositions[i] && lerpedPositions[i][finger];
+      const base = lerpedBasePositions[i] && lerpedBasePositions[i][finger];
+      const pip = lerpedPipPositions[i] && lerpedPipPositions[i][finger];
+      if (!tip || !base) continue;
+      const rw = sd.strokeWidth || 30;
+      // Compute adjusted draw positions (length = 2 * rectWidth, tip pinned)
+      const db = computeDrawBase(tip.x, tip.y, base.x, base.y, rw);
+      kf.hands[i][finger] = {
+        tipX: tip.x, tipY: tip.y,
+        baseX: db.x, baseY: db.y,
+        pipX: pip ? pip.x : (db.x + tip.x) / 2,
+        pipY: pip ? pip.y : (db.y + tip.y) / 2,
+        rectWidth: rw,
+        rectBezOrCircle: sd.rectBezOrCircle || 0,
+        rectOrBez: sd.rectOrBez || 0,
+        color: sd.color || '#000000'
+      };
+      hasData = true;
+    }
+  }
+  if (!hasData) return null;
+  animKeyframes.push(kf);
+  redistributeKeyframeTimes();
+  updateKeyframeCountLabel();
+  renderAnimTimeline();
+  return kf;
+}
+
+function redistributeKeyframeTimes() {
+  const n = animKeyframes.length;
+  if (n < 2) { if (n === 1) animKeyframes[0].t = 0; return; }
+  for (let i = 0; i < n; i++) animKeyframes[i].t = i / (n - 1);
+}
+
+function updateKeyframeCountLabel() {
+  const el = document.getElementById('anim-keyframe-count');
+  if (el) el.textContent = animKeyframes.length + ' keyframe' + (animKeyframes.length !== 1 ? 's' : '') + ' captured';
+}
+
+/** Lerp between two finger param objects. Color comes from kfA (no blending). */
+function lerpFingerParams(a, b, t) {
+  return {
+    tipX: a.tipX + (b.tipX - a.tipX) * t,
+    tipY: a.tipY + (b.tipY - a.tipY) * t,
+    baseX: a.baseX + (b.baseX - a.baseX) * t,
+    baseY: a.baseY + (b.baseY - a.baseY) * t,
+    pipX: a.pipX + (b.pipX - a.pipX) * t,
+    pipY: a.pipY + (b.pipY - a.pipY) * t,
+    rectWidth: a.rectWidth + (b.rectWidth - a.rectWidth) * t,
+    rectBezOrCircle: a.rectBezOrCircle + (b.rectBezOrCircle - a.rectBezOrCircle) * t,
+    rectOrBez: a.rectOrBez + (b.rectOrBez - a.rectOrBez) * t,
+    color: a.color // no color blending
+  };
+}
+
+/** Compute blended + straightened control points for animation (matches live pipeline). */
+/** Compute control points matching the live pipeline's double-straightening.
+ *  Pass 1: blend rect/bez CPs + straighten toward 1/3 (builds Paper.js path).
+ *  Pass 2: exportPaperBezierToP5 reads those handles and straightens again. */
+function computeAnimControlPoints(p) {
+  const dx = p.tipX - p.baseX, dy = p.tipY - p.baseY;
+  const rcp1X = p.baseX + dx / 3, rcp1Y = p.baseY + dy / 3;
+  const rcp2X = p.baseX + (2 * dx) / 3, rcp2Y = p.baseY + (2 * dy) / 3;
+  const { cp1X: bcp1X, cp1Y: bcp1Y, cp2X: bcp2X, cp2Y: bcp2Y } =
+    computeRotatedControlPoints(p.baseX, p.baseY, p.tipX, p.tipY, p.pipX, p.pipY);
+  // Blend based on rectOrBez
+  let cp1X = rcp1X + (bcp1X - rcp1X) * p.rectOrBez;
+  let cp1Y = rcp1Y + (bcp1Y - rcp1Y) * p.rectOrBez;
+  let cp2X = rcp2X + (bcp2X - rcp2X) * p.rectOrBez;
+  let cp2Y = rcp2Y + (bcp2Y - rcp2Y) * p.rectOrBez;
+  // Pass 1: straighten (as when building the Paper.js path)
+  const rbc = p.rectBezOrCircle;
+  const sf1 = rbc >= 0.3 ? 1 : (rbc > 0 ? rbc / 0.3 : 0);
+  if (sf1 > 0) {
+    cp1X += (rcp1X - cp1X) * sf1; cp1Y += (rcp1Y - cp1Y) * sf1;
+    cp2X += (rcp2X - cp2X) * sf1; cp2Y += (rcp2Y - cp2Y) * sf1;
+  }
+  // Pass 2: exportPaperBezierToP5 straightens again with the same factor
+  const sf2 = Math.min(1, rbc / 0.3);
+  if (sf2 > 0) {
+    cp1X += (rcp1X - cp1X) * sf2; cp1Y += (rcp1Y - cp1Y) * sf2;
+    cp2X += (rcp2X - cp2X) * sf2; cp2Y += (rcp2Y - cp2Y) * sf2;
+  }
+  return { cp1X, cp1Y, cp2X, cp2Y };
+}
+
+/** Draw a single finger shape from params — matches the live drawing pipeline. */
+function drawFingerFromParams(p) {
+  const c = color(p.color);
+  const rbc = p.rectBezOrCircle;
+  const dx = p.tipX - p.baseX, dy = p.tipY - p.baseY;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const ang = len > 0.001 ? Math.atan2(dy, dx) : 0;
+
+  if (rbc >= 0.5) {
+    // Circle / rounded-square (matches exportPaperCircleToP5)
+    const fullDiam = p.rectWidth * 1.28;
+    const fullR = fullDiam / 2;
+    const tp = (rbc - 0.5) * 2;
+    const br = (fullR / 2) + (fullR / 2) * tp;
+    const edge = p.rectWidth + (fullDiam - p.rectWidth) * tp;
+    // Center interpolates from line-segment midpoint to tip
+    const segLen = Math.min(p.rectWidth, len);
+    const dirX = len > 0.001 ? dx / len : 0, dirY = len > 0.001 ? dy / len : 0;
+    const segMidX = p.tipX - (segLen / 2) * dirX;
+    const segMidY = p.tipY - (segLen / 2) * dirY;
+    const cx = segMidX + (p.tipX - segMidX) * tp;
+    const cy = segMidY + (p.tipY - segMidY) * tp;
+    push();
+    fill(red(c), green(c), blue(c));
+    noStroke();
+    translate(cx, cy);
+    rotate(ang); // constant angle (matches live: lineSegmentAngle)
+    rectMode(CENTER);
+    rect(0, 0, edge, edge, br);
+    rectMode(CORNER);
+    pop();
+  } else if (rbc >= 0.3) {
+    // Transition rectangle (matches exportTransitionRectangleToP5)
+    if (len < 0.001) return;
+    const tp = (rbc - 0.3) / 0.2;
+    const fullLen = len;
+    const startLen = fullLen * 0.7;
+    const visLen = startLen - (startLen - p.rectWidth) * tp;
+    const fullR = (p.rectWidth * 1.28) / 2;
+    const br = Math.max(0, (fullR / 2) * tp);
+    const dirX = dx / len, dirY = dy / len;
+    const sx = p.tipX - visLen * dirX, sy = p.tipY - visLen * dirY;
+    fill(red(c), green(c), blue(c));
+    noStroke();
+    push();
+    translate((sx + p.tipX) / 2, (sy + p.tipY) / 2);
+    rotate(ang);
+    rectMode(CENTER);
+    rect(0, 0, visLen, p.rectWidth, br);
+    rectMode(CORNER);
+    pop();
+  } else {
+    // Bezier with 30-degree rotated control points + partial undrawing
+    const { cp1X, cp1Y, cp2X, cp2Y } = computeAnimControlPoints(p);
+    // Visible portion: 1.0 at rbc=0, 0.7 at rbc=0.3
+    let visPortion = rbc > 0 ? 1.0 - (rbc / 0.3) * 0.3 : 1.0;
+    noFill();
+    strokeCap(SQUARE);
+    stroke(red(c), green(c), blue(c));
+    strokeWeight(p.rectWidth);
+    if (visPortion >= 0.999) {
+      bezier(p.baseX, p.baseY, cp1X, cp1Y, cp2X, cp2Y, p.tipX, p.tipY);
+    } else {
+      // Partial draw from tip backward — sample bezier, use curveVertex for smooth interpolation
+      // Matches live pipeline's path sampling + curveVertex approach
+      const targetLen = Math.max(p.rectWidth, len * visPortion);
+      const steps = Math.max(20, Math.ceil(len * 2));
+      const startT = 1.0 - visPortion;
+      beginShape();
+      noFill();
+      for (let s = 0; s <= steps; s++) {
+        const t = startT + (1.0 - startT) * (s / steps);
+        const u = 1 - t;
+        const bx = u*u*u*p.baseX + 3*u*u*t*cp1X + 3*u*t*t*cp2X + t*t*t*p.tipX;
+        const by = u*u*u*p.baseY + 3*u*u*t*cp1Y + 3*u*t*t*cp2Y + t*t*t*p.tipY;
+        curveVertex(bx, by);
+      }
+      endShape();
+    }
+  }
+}
+
+/** Find the two keyframes surrounding a loopT value and compute segment t. */
+function resolveKeyframePair(loopT) {
+  const n = animKeyframes.length;
+  if (n === 0) return null;
+  if (n === 1) return { kfA: animKeyframes[0], kfB: animKeyframes[0], segT: 0 };
+  let idx = 0;
+  for (let i = 0; i < n - 1; i++) {
+    if (animKeyframes[i].t <= loopT) idx = i;
+  }
+  const kfA = animKeyframes[idx];
+  const kfB = animKeyframes[Math.min(idx + 1, n - 1)];
+  const segLen = kfB.t - kfA.t;
+  let segT = segLen > 0.001 ? (loopT - kfA.t) / segLen : 0;
+  segT = Math.max(0, Math.min(1, segT));
+  segT = segT * segT * (3 - 2 * segT); // smooth-step
+  return { kfA, kfB, segT };
+}
+
+/** Draw the animation preview frame. Returns the current loopT (0-1) for playhead. */
+function drawAnimPreview() {
+  if (animKeyframes.length < 1) return 0;
+  const elapsed = (millis() - animPreviewStart) / 1000;
+  const loopT = (elapsed % animTotalDuration) / animTotalDuration;
+  const pair = resolveKeyframePair(loopT);
+  if (!pair) return 0;
+  const { kfA, kfB, segT } = pair;
+
+  push();
+  translate(width, 0);
+  scale(-1, 1);
+  // Iterate union of both keyframes' hands/fingers
+  const allHands = new Set([...Object.keys(kfA.hands), ...Object.keys(kfB.hands)]);
+  for (const hi of allHands) {
+    const allFingers = new Set([
+      ...Object.keys(kfA.hands[hi] || {}),
+      ...Object.keys(kfB.hands[hi] || {})
+    ]);
+    for (const fn of allFingers) {
+      const fA = kfA.hands[hi] && kfA.hands[hi][fn];
+      const fB = kfB.hands[hi] && kfB.hands[hi][fn];
+      if (!fA && !fB) continue;
+      const p = fA && fB ? lerpFingerParams(fA, fB, segT) : (fA || fB);
+      drawFingerFromParams(p);
+    }
+  }
+  pop();
+  return loopT;
+}
+
+/** Normalize a Paper.js path to a fixed-point polygon (for SVG export). */
+function normalizePathForAnimation(paperPath, numPoints) {
+  numPoints = numPoints || ANIM_PATH_POINTS;
+  const len = paperPath.length;
+  if (len < 1) return null;
+  const pts = [];
+  for (let i = 0; i <= numPoints; i++) {
+    const pt = paperPath.getPointAt(Math.min((i / numPoints) * len, len));
+    if (pt) pts.push({ x: Math.round(pt.x * 100) / 100, y: Math.round(pt.y * 100) / 100 });
+  }
+  if (pts.length < 2) return null;
+  let d = 'M' + pts[0].x + ' ' + pts[0].y;
+  for (let i = 1; i < pts.length; i++) d += ' L' + pts[i].x + ' ' + pts[i].y;
+  d += 'Z';
+  return d;
+}
+
+/** Build the timeline DOM element inside the Animation fieldset. */
+function buildAnimTimeline() {
+  const placeholder = document.getElementById('anim-timeline-wrap');
+  if (!placeholder) return;
+  placeholder.innerHTML = '';
+  const track = document.createElement('div');
+  track.className = 'anim-timeline-track';
+  track.id = 'anim-timeline-track';
+  placeholder.appendChild(track);
+  // Playhead
+  const playhead = document.createElement('div');
+  playhead.className = 'anim-timeline-playhead';
+  playhead.id = 'anim-timeline-playhead';
+  track.appendChild(playhead);
+  renderAnimTimeline();
+}
+
+/** Render keyframe dots on the timeline. Called after capture/delete/drag. */
+function renderAnimTimeline() {
+  const track = document.getElementById('anim-timeline-track');
+  if (!track) return;
+  // Remove old dots (keep playhead)
+  track.querySelectorAll('.anim-timeline-dot').forEach(d => d.remove());
+  animKeyframes.forEach((kf, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'anim-timeline-dot';
+    dot.style.left = (kf.t * 100) + '%';
+    dot.title = 'Keyframe ' + (i + 1);
+    dot.textContent = i + 1;
+    dot.dataset.index = i;
+    // Drag to reposition
+    dot.addEventListener('mousedown', (e) => startDotDrag(e, i));
+    dot.addEventListener('touchstart', (e) => startDotDrag(e, i), { passive: false });
+    // Right-click or double-click to delete
+    dot.addEventListener('dblclick', () => {
+      animKeyframes.splice(i, 1);
+      redistributeKeyframeTimes();
+      updateKeyframeCountLabel();
+      renderAnimTimeline();
+    });
+    track.appendChild(dot);
+  });
+}
+
+function startDotDrag(e, index) {
+  e.preventDefault();
+  const track = document.getElementById('anim-timeline-track');
+  if (!track) return;
+  const rect = track.getBoundingClientRect();
+  const n = animKeyframes.length;
+  // Bounds: can't go before previous keyframe or after next
+  const minT = index > 0 ? animKeyframes[index - 1].t + 0.01 : 0;
+  const maxT = index < n - 1 ? animKeyframes[index + 1].t - 0.01 : 1;
+
+  function onMove(ev) {
+    const clientX = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    let t = (clientX - rect.left) / rect.width;
+    t = Math.max(minT, Math.min(maxT, t));
+    animKeyframes[index].t = Math.round(t * 1000) / 1000;
+    renderAnimTimeline();
+  }
+  function onUp() {
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    window.removeEventListener('touchmove', onMove);
+    window.removeEventListener('touchend', onUp);
+  }
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  window.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+}
+
+/** Update the playhead position on the timeline (called from draw). */
+function updateAnimPlayhead(loopT) {
+  const ph = document.getElementById('anim-timeline-playhead');
+  if (ph) ph.style.left = (loopT * 100) + '%';
+}
+
+/** Build a Paper.js shape from finger params and return normalized SVG path data.
+ *  Handles all three shape states to match the live pipeline. */
+function fingerParamsToSVGPath(p) {
+  let paperPath = null;
+  const rbc = p.rectBezOrCircle;
+  const dx = p.tipX - p.baseX, dy = p.tipY - p.baseY;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const ang = len > 0.001 ? Math.atan2(dy, dx) : 0;
+
+  if (rbc >= 0.5) {
+    // Circle/square with rotation (matches exportPaperCircleToP5)
+    const fullDiam = p.rectWidth * 1.28;
+    const fullR = fullDiam / 2;
+    const tp = (rbc - 0.5) * 2;
+    const br = (fullR / 2) + (fullR / 2) * tp;
+    const edge = p.rectWidth + (fullDiam - p.rectWidth) * tp;
+    const segLen = Math.min(p.rectWidth, len);
+    const dirX = len > 0.001 ? dx / len : 0, dirY = len > 0.001 ? dy / len : 0;
+    const segMidX = p.tipX - (segLen / 2) * dirX, segMidY = p.tipY - (segLen / 2) * dirY;
+    const cx = segMidX + (p.tipX - segMidX) * tp;
+    const cy = segMidY + (p.tipY - segMidY) * tp;
+    paperPath = new paper.Path.Rectangle(
+      new paper.Rectangle(cx - edge / 2, cy - edge / 2, edge, edge),
+      new paper.Size(br, br)
+    );
+    paperPath.rotate(ang * 180 / Math.PI, new paper.Point(cx, cy));
+  } else if (rbc >= 0.3) {
+    // Transition rectangle (matches exportTransitionRectangleToP5)
+    if (len < 0.001) return null;
+    const tp = (rbc - 0.3) / 0.2;
+    const startLen = len * 0.7;
+    const visLen = startLen - (startLen - p.rectWidth) * tp;
+    const fullR = (p.rectWidth * 1.28) / 2;
+    const br = Math.max(0, (fullR / 2) * tp);
+    const dirX = dx / len, dirY = dy / len;
+    const sx = p.tipX - visLen * dirX, sy = p.tipY - visLen * dirY;
+    const cx = (sx + p.tipX) / 2, cy = (sy + p.tipY) / 2;
+    paperPath = new paper.Path.Rectangle(
+      new paper.Rectangle(cx - visLen / 2, cy - p.rectWidth / 2, visLen, p.rectWidth),
+      new paper.Size(br, br)
+    );
+    paperPath.rotate(ang * 180 / Math.PI, new paper.Point(cx, cy));
+  } else {
+    // Bezier with rotated control points + partial undrawing
+    const { cp1X, cp1Y, cp2X, cp2Y } = computeAnimControlPoints(p);
+    let visPortion = rbc > 0 ? 1.0 - (rbc / 0.3) * 0.3 : 1.0;
+    // Create the bezier path
+    const bezPath = new paper.Path();
+    bezPath.add(new paper.Segment(new paper.Point(p.baseX, p.baseY), null, new paper.Point(cp1X - p.baseX, cp1Y - p.baseY)));
+    bezPath.add(new paper.Segment(new paper.Point(p.tipX, p.tipY), new paper.Point(cp2X - p.tipX, cp2Y - p.tipY), null));
+    // If partially visible, trim from tip backward
+    if (visPortion < 0.999 && bezPath.length > 0) {
+      const targetLen = Math.max(p.rectWidth, bezPath.length * visPortion);
+      const startOffset = bezPath.length - targetLen;
+      const trimmed = bezPath.clone();
+      try {
+        const split = trimmed.splitAt(startOffset);
+        if (split) { bezPath.remove(); paperPath = split; }
+        else { trimmed.remove(); }
+      } catch (e) { trimmed.remove(); }
+    }
+    if (!paperPath) paperPath = bezPath;
+    paperPath.strokeWidth = p.rectWidth;
+    paperPath.strokeCap = 'square';
+    const outline = bezierPathToOutline(paperPath, p.rectWidth);
+    if (outline) { paperPath.remove(); paperPath = outline; }
+  }
+
+  if (!paperPath) return null;
+  const d = normalizePathForAnimation(paperPath);
+  paperPath.remove();
+  return d;
+}
+
+/** Export keyframes as an animated SVG with CSS @keyframes.
+ *  Samples the animation at many time points, reconstructs Paper.js shapes
+ *  from interpolated finger params, and generates compatible SVG paths. */
+function exportAnimatedSVG() {
+  if (animKeyframes.length < 2) {
+    console.warn('Need at least 2 keyframes to export animation');
+    return;
+  }
+
+  // Find common finger IDs across all keyframes
+  const fingerSets = animKeyframes.map(kf => {
+    const s = new Set();
+    for (const hi in kf.hands) for (const fn in kf.hands[hi]) s.add(hi + ':' + fn);
+    return s;
+  });
+  const commonFingers = [...fingerSets[0]].filter(fid => fingerSets.every(s => s.has(fid)));
+  if (commonFingers.length === 0) { console.warn('No fingers common to all keyframes'); return; }
+
+  // Sample at many time points for smooth CSS animation
+  const numSamples = 30;
+  const dur = animTotalDuration;
+  let style = '';
+  let paths = '';
+
+  for (const fid of commonFingers) {
+    const [hi, fn] = fid.split(':');
+    const safeFid = fid.replace(/:/g, '-');
+    const firstColor = animKeyframes[0].hands[hi][fn].color;
+
+    style += `@keyframes a-${safeFid}{`;
+    let firstD = null;
+    for (let s = 0; s <= numSamples; s++) {
+      const loopT = s / numSamples;
+      const pct = Math.round(loopT * 100);
+      const pair = resolveKeyframePair(loopT);
+      if (!pair) continue;
+      const fA = pair.kfA.hands[hi] && pair.kfA.hands[hi][fn];
+      const fB = pair.kfB.hands[hi] && pair.kfB.hands[hi][fn];
+      if (!fA) continue;
+      const p = fB ? lerpFingerParams(fA, fB, pair.segT) : fA;
+      const d = fingerParamsToSVGPath(p);
+      if (!d) continue;
+      if (!firstD) firstD = d;
+      style += `${pct}%{d:path("${d}")}`;
+    }
+    style += '}';
+    if (firstD) {
+      paths += `<path fill="${firstColor}" d="${firstD}" style="animation:a-${safeFid} ${dur}s ease-in-out infinite"/>`;
+    }
+  }
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+<style>${style}</style>
+<rect width="100%" height="100%" fill="#fff"/>
+<g transform="scale(-1,1) translate(-${width},0)">${paths}</g>
+</svg>`;
+
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'hand-animation.svg'; a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function setup() {
   const { width, height } = calculateCanvasSize();
   createCanvas(width, height);
@@ -1476,6 +2094,7 @@ async function setup() {
       controls: [
         {
           type: 'fieldset',
+          id: 'tab-logo',
           legend: 'Logo',
           plain: true,
           controls: [
@@ -1513,6 +2132,7 @@ async function setup() {
         },
         {
           type: 'fieldset',
+          id: 'tab-fill',
           legend: 'Hand Background',
           plain: true,
           controls: [
@@ -1589,6 +2209,7 @@ async function setup() {
         },
         {
           type: 'fieldset',
+          id: 'tab-bg',
           legend: 'Background',
           plain: true,
           controls: [
@@ -1621,45 +2242,176 @@ async function setup() {
         },
         {
           type: 'fieldset',
+          id: 'tab-export',
           legend: 'Export',
           plain: true,
           controls: [
+            {
+              type: 'slider',
+              id: 'saveDelay',
+              min: 0,
+              max: 10,
+              step: 1,
+              value: saveCountdownDelay,
+              label: 'Self-timer',
+              suffix: 's',
+              onChange: (v) => { saveCountdownDelay = v; }
+            },
+            {
+              type: 'section',
+              label: 'Capture'
+            },
             {
               type: 'group',
               className: 'cotton-cp-export-stack',
               controls: [
                 {
-                  type: 'slider',
-                  id: 'saveDelay',
-                  min: 0,
-                  max: 10,
-                  step: 1,
-                  value: saveCountdownDelay,
-                  label: 'Self-timer',
-                  suffix: 's',
-                  onChange: (v) => {
-                    saveCountdownDelay = v;
-                  }
-                },
-                {
                   type: 'button',
                   id: 'save-png-button',
-                  label: 'Save Image',
+                  label: 'Save PNG',
                   variant: 'primary',
                   block: true,
                   medium: true,
                   onClick: (panel) => {
-                    let delay = parseInt(panel.values.saveDelay, 10);
-                    if (isNaN(delay)) delay = 3;
+                    const delay = parseInt(panel.values.saveDelay, 10) || 0;
                     saveCountdownDelay = delay;
-                    if (delay === 0) saveCanvas('hand-tracking', 'png');
-                    else {
-                      saveCountdown = delay;
-                      saveCountdownStartTime = millis();
-                    }
+                    savePendingAction = 'png';
+                    if (delay === 0) { saveCanvas('hand-tracking', 'png'); savePendingAction = null; }
+                    else { saveCountdown = delay; saveCountdownStartTime = millis(); }
+                  }
+                },
+                {
+                  type: 'button',
+                  id: 'save-svg-button',
+                  label: 'Save SVG',
+                  variant: 'secondary',
+                  block: true,
+                  medium: true,
+                  onClick: (panel) => {
+                    const delay = parseInt(panel.values.saveDelay, 10) || 0;
+                    saveCountdownDelay = delay;
+                    savePendingAction = 'svg';
+                    if (delay === 0) { exportSVG(); savePendingAction = null; }
+                    else { saveCountdown = delay; saveCountdownStartTime = millis(); }
                   }
                 }
               ]
+            },
+            {
+              type: 'section',
+              label: 'Record'
+            },
+            {
+              type: 'slider',
+              id: 'recordDuration',
+              min: 1,
+              max: 30,
+              step: 1,
+              value: recordDuration,
+              label: 'Duration',
+              suffix: 's',
+              onChange: (v) => { recordDuration = v; }
+            },
+            {
+              type: 'button',
+              id: 'record-button',
+              label: 'Record Video',
+              variant: 'primary',
+              block: true,
+              medium: true,
+              onClick: (panel) => {
+                if (isRecording) {
+                  stopRecording();
+                  return;
+                }
+                const delay = parseInt(panel.values.saveDelay, 10) || 0;
+                saveCountdownDelay = delay;
+                savePendingAction = 'record';
+                if (delay === 0) { startRecording(); savePendingAction = null; }
+                else { saveCountdown = delay; saveCountdownStartTime = millis(); }
+              }
+            }
+          ]
+        },
+        {
+          type: 'fieldset',
+          id: 'tab-anim',
+          legend: 'Animation',
+          plain: true,
+          controls: [
+            {
+              type: 'section',
+              label: 'Keyframes'
+            },
+            {
+              type: 'button',
+              id: 'anim-capture-btn',
+              label: 'Capture Pose',
+              variant: 'primary',
+              block: true,
+              medium: true,
+              onClick: () => {
+                const kf = captureKeyframe();
+                if (!kf) console.warn('No hand shapes visible to capture');
+              }
+            },
+            {
+              type: 'button',
+              id: 'anim-clear-btn',
+              label: 'Clear All',
+              variant: 'secondary',
+              block: true,
+              onClick: () => {
+                animKeyframes = [];
+                animPreview = false;
+                updateKeyframeCountLabel();
+                renderAnimTimeline();
+              }
+            },
+            {
+              type: 'section',
+              id: 'anim-keyframe-count',
+              label: '0 keyframes captured'
+            },
+            {
+              type: 'group',
+              id: 'anim-timeline-wrap',
+              className: 'anim-timeline-wrap'
+            },
+            {
+              type: 'slider',
+              id: 'animDuration',
+              min: 0.5,
+              max: 10,
+              step: 0.5,
+              value: animTotalDuration,
+              label: 'Duration',
+              suffix: 's',
+              onChange: (v) => { animTotalDuration = v; }
+            },
+            {
+              type: 'section',
+              label: 'Preview & Export'
+            },
+            {
+              type: 'checkbox',
+              id: 'animPreview',
+              label: 'Preview animation',
+              value: false,
+              toggle: true,
+              onChange: (v) => {
+                animPreview = v;
+                if (v) animPreviewStart = millis();
+              }
+            },
+            {
+              type: 'button',
+              id: 'anim-export-svg-btn',
+              label: 'Export Animated SVG',
+              variant: 'primary',
+              block: true,
+              medium: true,
+              onClick: () => { exportAnimatedSVG(); }
             }
           ]
         },
@@ -1739,6 +2491,44 @@ async function setup() {
     backgroundMode = cp.values.bgMode;
     handFillSelection[0] = cp.values.handFill0;
     handFillSelection[1] = cp.values.handFill1 || handFillSelection[0];
+
+    // Build tab bar — "Look" combines Logo + Fill + Background
+    const tabs = [
+      { label: 'Look', fieldsets: ['tab-logo', 'tab-fill', 'tab-bg'] },
+      { label: 'Export', fieldsets: ['tab-export'] },
+      { label: 'Animate', fieldsets: ['tab-anim'] }
+    ];
+    const allFieldsetIds = tabs.flatMap(t => t.fieldsets);
+    const tabBar = document.createElement('div');
+    tabBar.className = 'cotton-cp-tab-bar';
+    const stackBody = cp.root.querySelector('.cotton-cp-stack-body');
+    stackBody.insertBefore(tabBar, stackBody.firstChild);
+
+    function setTab(idx) {
+      allFieldsetIds.forEach(id => {
+        const fs = document.getElementById(id);
+        if (fs) fs.style.display = 'none';
+      });
+      tabs[idx].fieldsets.forEach(id => {
+        const fs = document.getElementById(id);
+        if (fs) fs.style.display = '';
+      });
+      tabBar.querySelectorAll('.cotton-cp-tab').forEach((btn, i) => {
+        btn.classList.toggle('cotton-cp-tab--active', i === idx);
+      });
+    }
+    tabs.forEach((t, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'cotton-cp-tab';
+      btn.type = 'button';
+      btn.textContent = t.label;
+      btn.addEventListener('click', () => setTab(i));
+      tabBar.appendChild(btn);
+    });
+    setTab(0);
+
+    // Build the draggable timeline inside the Animation tab
+    buildAnimTimeline();
   }
 }
 
@@ -1990,7 +2780,13 @@ function draw() {
   scale(-1, 1);
   image(handsBuffer, 0, 0);
   pop();
-  
+
+  // Animation preview overlay
+  if (animPreview && animKeyframes.length > 0) {
+    const loopT = drawAnimPreview();
+    updateAnimPlayhead(loopT);
+  }
+
   // Draw debug information if enabled
   if (debugHandDetection) {
     drawDebugInfo();
@@ -2013,28 +2809,44 @@ function draw() {
   
   updateCalibrationOverlay();
   
-  // Handle save countdown
+  // Handle save countdown (for PNG, SVG, or Record)
   if (saveCountdown >= 0) {
-    const elapsed = (millis() - saveCountdownStartTime) / 1000; // Convert to seconds
+    const elapsed = (millis() - saveCountdownStartTime) / 1000;
     const remaining = Math.ceil(saveCountdownDelay - elapsed);
-    
+
     if (remaining > 0) {
-      // Display countdown in bottom left
       push();
-      fill(0); // Black
+      fill(0);
       noStroke();
       textAlign(LEFT, BOTTOM);
       textSize(200);
       text(remaining.toString(), 20, height - 20);
       pop();
-      
-      // Update countdown
       saveCountdown = remaining;
     } else {
-      // Countdown finished - save PNG (countdown is 0, so it won't be visible)
-      saveCountdown = -1; // Reset countdown
-      saveCanvas('hand-tracking', 'png');
+      saveCountdown = -1;
+      if (savePendingAction === 'png') saveCanvas('hand-tracking', 'png');
+      else if (savePendingAction === 'svg') exportSVG();
+      else if (savePendingAction === 'record') startRecording();
+      savePendingAction = null;
     }
+  }
+
+  // Handle active recording — show indicator and auto-stop after duration
+  if (isRecording) {
+    const recElapsed = (millis() - recordStartTime) / 1000;
+    const recRemaining = Math.max(0, recordDuration - recElapsed);
+    // Red recording dot + time remaining
+    push();
+    fill(255, 0, 0);
+    noStroke();
+    ellipse(30, 30, 18, 18);
+    fill(255);
+    textAlign(LEFT, CENTER);
+    textSize(16);
+    text(recRemaining.toFixed(1) + 's', 46, 30);
+    pop();
+    if (recRemaining <= 0) stopRecording();
   }
 }
 
