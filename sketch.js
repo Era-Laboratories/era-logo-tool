@@ -2816,6 +2816,19 @@ async function setup() {
               block: true,
               medium: true,
               onClick: () => { exportWidgetPoses(); }
+            },
+            {
+              type: 'button',
+              id: 'widget-export-js',
+              label: 'Download era-hand.js',
+              variant: 'secondary',
+              block: true,
+              onClick: () => {
+                const a = document.createElement('a');
+                a.href = 'era-hand.js';
+                a.download = 'era-hand.js';
+                a.click();
+              }
             }
           ]
         },
