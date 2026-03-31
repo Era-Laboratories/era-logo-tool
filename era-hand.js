@@ -528,9 +528,11 @@
       var refSize = poseScales[activePoseName] || 200;
       var scale = size / refSize;
       ctx.translate(size / 2, size / 2);
+      ctx.globalAlpha = opts.opacity !== undefined ? opts.opacity : 0.85;
       for (var fk in renderPose) {
         renderFinger(ctx, renderPose[fk], scale);
       }
+      ctx.globalAlpha = 1.0;
       ctx.restore();
     }
 
