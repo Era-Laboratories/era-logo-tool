@@ -271,7 +271,7 @@ const INTERSECTION_COLOR_MAP = {
   // yellow (#F5F500) overlaps
   '#f5f500,#f945a6': '#F9CF45', // yellow + pink
   // Self-overlaps (same color on same color)
-  '#5af2af,#5af2af': '#E3047C', // green + green
+  // green self-overlap: no brand override — natural multiply darkening applies
   '#2fb3ff,#2fb3ff': '#2D8AD7', // blue + blue
   '#bfff10,#bfff10': '#B3EE10', // lime + lime
   '#ff4d01,#ff4d01': '#D32A00', // red + red
