@@ -321,7 +321,9 @@ function fixOverlapColors(buf) {
   if (!MULTIPLY_TO_BRAND) buildMultiplyLookup();
   if (MULTIPLY_TO_BRAND.length === 0) return;
   const ctx = buf.drawingContext;
-  const w = buf.width, h = buf.height;
+  // Use actual backing store dimensions (accounts for retina/HiDPI pixel density)
+  const cvs = ctx.canvas;
+  const w = cvs.width, h = cvs.height;
   const imgData = ctx.getImageData(0, 0, w, h);
   const d = imgData.data;
   const tol = OVERLAP_TOLERANCE;
