@@ -4042,11 +4042,12 @@ function calculateNormalizeOffset(bufferedHands, layout) {
     const avgX = sumX / landmarks.length;
     const avgY = sumY / landmarks.length;
     
-    // Use the EMA-smoothed hand scale for normalization to prevent tip jitter.
-    // The raw computeHandScale fluctuates frame-to-frame from ML noise, and since
-    // normalization scales landmarks around the centroid, tips (farthest from centroid)
-    // get the most amplification — causing visible jitter that exceeds the dead zone.
-    const currentRawScale = getSmoothedRawHandScale(i);
+    // Use EMA-smoothed scale after calibration to prevent tip jitter.
+    // During calibration, use instantaneous scale so landmarks are stable enough
+    // for the stability check to pass (smoothed scale depends on updateHandCloseness
+    // which hasn't run yet on the first frames).
+    const hand0Calibrated = getCalibrationState(0).isCalibrated;
+    const currentRawScale = hand0Calibrated ? getSmoothedRawHandScale(i) : computeHandScale(landmarks, i);
 
     const targetRawScale = 100;
     let scaleFactor = 1.0;
