@@ -239,31 +239,45 @@ const BRIGHT_ORANGE_RED = "#FF4D01";
 // Maps pairs of colors (sorted alphabetically for consistency) to the resulting intersection color
 // Format: 'color1,color2' -> 'resultColor'
 // Colors are sorted alphabetically so order doesn't matter (e.g., '#006258,#1216F6' is the same as '#1216F6,#006258')
+// Overlap color lookup from brand guidelines (Overlap Color Palette.pdf)
+// Keys are sorted lowercase hex pairs. Order: green, blue, lime, red, purple, yellow, pink
+// Grid: rows = columns = [#5AF2AF, #2FB3FF, #BFFF10, #FF4D01, #E084F4, #F5F500, #F945A6]
 const INTERSECTION_COLOR_MAP = {
-  // Add your color combinations here
-  // Example entries (uncomment and modify as needed):
-  // '#006258,#1216f6': '#404080', // dark teal + bright blue
-  // '#006258,#cfb4f4': '#6a7ba6', // dark teal + light purple
-  // '#006258,#d0ef08': '#507e83', // dark teal + chartreuse
-  // '#006258,#ff4618': '#805638', // dark teal + vibrant orange
-  // '#006258,#ffa4f7': '#8083a7', // dark teal + light pink
-  // '#006258,#ffb574': '#808966', // dark teal + light orange
-  // '#1216f6,#cfb4f4': '#6f65fa', // bright blue + light purple
-  // '#1216f6,#d0ef08': '#718284', // bright blue + chartreuse
-  // '#1216f6,#ff4618': '#892e87', // bright blue + vibrant orange
-  // '#1216f6,#ffa4f7': '#895df7', // bright blue + light pink
-  // '#1216f6,#ffb574': '#8965b5', // bright blue + light orange
-  // '#cfb4f4,#d0ef08': '#d1d1f6', // light purple + chartreuse
-  // '#cfb4f4,#ff4618': '#e77d86', // light purple + vibrant orange
-  // '#cfb4f4,#ffa4f7': '#e7acf5', // light purple + light pink
-  // '#cfb4f4,#ffb574': '#e7d4b4', // light purple + light orange
-  // '#d0ef08,#ff4618': '#e79a13', // chartreuse + vibrant orange
-  // '#d0ef08,#ffa4f7': '#e7c97f', // chartreuse + light pink
-  // '#d0ef08,#ffb574': '#e7d23e', // chartreuse + light orange
-  // '#ff4618,#ffa4f7': '#ff7587', // vibrant orange + light pink
-  // '#ff4618,#ffb574': '#ff7e46', // vibrant orange + light orange
-  // '#ffa4f7,#ffb574': '#ffb0b5', // light pink + light orange
-  // If a combination is not in this map, it will default to black (#000000)
+  // green (#5AF2AF) overlaps
+  '#2fb3ff,#5af2af': '#3B99B8', // green + blue
+  '#5af2af,#bfff10': '#28D287', // green + lime
+  '#5af2af,#ff4d01': '#B8633F', // green + red
+  '#5af2af,#e084f4': '#5A5FF2', // green + purple
+  '#5af2af,#f5f500': '#4CDC79', // green + yellow
+  '#5af2af,#f945a6': '#E3047C', // green + pink
+  // blue (#2FB3FF) overlaps
+  '#2fb3ff,#bfff10': '#23B310', // blue + lime
+  '#2fb3ff,#ff4d01': '#D32A00', // blue + red
+  '#2fb3ff,#e084f4': '#5A5FF2', // blue + purple
+  '#2fb3ff,#f5f500': '#BCE100', // blue + yellow
+  '#2fb3ff,#f945a6': '#3B99B8', // blue + pink
+  // lime (#BFFF10) overlaps
+  '#bfff10,#ff4d01': '#D78D47', // lime + red
+  '#bfff10,#e084f4': '#6C7DEE', // lime + purple
+  '#bfff10,#f5f500': '#DDE415', // lime + yellow
+  '#bfff10,#f945a6': '#FD7CDD', // lime + pink
+  // red (#FF4D01) overlaps
+  '#e084f4,#ff4d01': '#C5010E', // red + purple
+  '#f5f500,#ff4d01': '#FF8001', // red + yellow
+  '#f945a6,#ff4d01': '#C5010E', // red + pink
+  // purple (#E084F4) overlaps
+  '#e084f4,#f5f500': '#ED67C9', // purple + yellow
+  '#e084f4,#f945a6': '#C739A8', // purple + pink
+  // yellow (#F5F500) overlaps
+  '#f5f500,#f945a6': '#F9CF45', // yellow + pink
+  // Self-overlaps (same color on same color)
+  '#5af2af,#5af2af': '#E3047C', // green + green
+  '#2fb3ff,#2fb3ff': '#2D8AD7', // blue + blue
+  '#bfff10,#bfff10': '#B3EE10', // lime + lime
+  '#ff4d01,#ff4d01': '#D32A00', // red + red
+  '#e084f4,#e084f4': '#C75ADF', // purple + purple
+  '#f5f500,#f5f500': '#E1E100', // yellow + yellow
+  '#f945a6,#f945a6': '#E3047C', // pink + pink
 };
 
 // Helper function to get intersection color from two source colors
