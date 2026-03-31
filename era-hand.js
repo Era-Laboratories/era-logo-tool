@@ -577,47 +577,50 @@
       var ty = canvasY - size / 2;
       canvas.style.transform = 'translate(' + tx + 'px,' + ty + 'px)';
 
-      // Draw to offscreen buffer with multiply blend (white bg → multiply → remove white)
-      offCtx.globalCompositeOperation = 'source-over';
-      offCtx.clearRect(0, 0, size, size);
-      offCtx.fillStyle = '#ffffff';
-      offCtx.fillRect(0, 0, size, size);
-      offCtx.globalCompositeOperation = 'multiply';
-      offCtx.save();
-      offCtx.translate(size, 0);
-      offCtx.scale(-1, 1);
+      ctx.clearRect(0, 0, size, size);
       var refSize = poseScales[activePoseName] || 200;
       var scale = size / refSize;
-      offCtx.translate(size / 2, size / 2);
-      for (var fk in renderPose) {
-        renderFinger(offCtx, renderPose[fk], scale);
-      }
-      offCtx.restore();
+      var alpha = opts.opacity !== undefined ? opts.opacity : 0.85;
 
-      // Single pixel pass: fix overlap colors + strip white background
-      ctx.clearRect(0, 0, size, size);
-      var imgData = offCtx.getImageData(0, 0, size, size);
-      var d = imgData.data;
-      var lookups = getMultiplyLookup();
-      var ln = lookups.length;
-      var tol = 8;
-      for (var px = 0; px < d.length; px += 4) {
-        // White background → transparent
-        if (d[px] >= 254 && d[px + 1] >= 254 && d[px + 2] >= 254) {
-          d[px + 3] = 0;
-          continue;
-        }
-        // Check if this pixel matches a multiply blend result → replace with brand color
-        var r = d[px], g = d[px + 1], b = d[px + 2];
-        for (var li = 0; li < ln; li++) {
-          var l = lookups[li];
-          if (Math.abs(r - l.mr) <= tol && Math.abs(g - l.mg) <= tol && Math.abs(b - l.mb) <= tol) {
-            d[px] = l.br; d[px + 1] = l.bg; d[px + 2] = l.bb;
-            break;
-          }
+      // Draw all fingers to main canvas
+      offCtx.clearRect(0, 0, size, size);
+      offCtx.globalCompositeOperation = 'source-over';
+      offCtx.save();
+      offCtx.translate(size, 0); offCtx.scale(-1, 1); offCtx.translate(size / 2, size / 2);
+      for (var fk in renderPose) renderFinger(offCtx, renderPose[fk], scale);
+      offCtx.restore();
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(offCanvas, 0, 0);
+
+      // Draw brand overlap colors on top for each overlapping pair
+      // Uses source-in compositing: draw finger A → source-in finger B → source-in fill color
+      // This produces the exact intersection shape filled with the brand color, no aliasing
+      var fingerKeys = Object.keys(renderPose);
+      for (var fi = 0; fi < fingerKeys.length; fi++) {
+        for (var fj = fi + 1; fj < fingerKeys.length; fj++) {
+          var fpA = renderPose[fingerKeys[fi]];
+          var fpB = renderPose[fingerKeys[fj]];
+          var bc = getOverlapColor(fpA.color, fpB.color);
+          if (!bc) continue;
+          offCtx.clearRect(0, 0, size, size);
+          offCtx.globalCompositeOperation = 'source-over';
+          offCtx.save();
+          offCtx.translate(size, 0); offCtx.scale(-1, 1); offCtx.translate(size / 2, size / 2);
+          renderFinger(offCtx, fpA, scale);
+          offCtx.restore();
+          offCtx.globalCompositeOperation = 'source-in';
+          offCtx.save();
+          offCtx.translate(size, 0); offCtx.scale(-1, 1); offCtx.translate(size / 2, size / 2);
+          renderFinger(offCtx, fpB, scale);
+          offCtx.restore();
+          offCtx.globalCompositeOperation = 'source-in';
+          offCtx.fillStyle = bc;
+          offCtx.fillRect(0, 0, size, size);
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(offCanvas, 0, 0);
         }
       }
-      ctx.putImageData(imgData, 0, 0);
+      ctx.globalAlpha = 1.0;
     }
 
     rafId = requestAnimationFrame(frame);
