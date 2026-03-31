@@ -2,6 +2,30 @@
   'use strict';
 
   // ---------------------------------------------------------------------------
+  // Brand overlap color map (from Overlap Color Palette PDF)
+  // ---------------------------------------------------------------------------
+
+  var OVERLAP_COLORS = {
+    '#2fb3ff,#5af2af': '#3B99B8', '#5af2af,#bfff10': '#28D287',
+    '#5af2af,#ff4d01': '#B8633F', '#5af2af,#e084f4': '#5A5FF2',
+    '#5af2af,#f5f500': '#4CDC79', '#5af2af,#f945a6': '#E3047C',
+    '#2fb3ff,#bfff10': '#23B310', '#2fb3ff,#ff4d01': '#D32A00',
+    '#2fb3ff,#e084f4': '#5A5FF2', '#2fb3ff,#f5f500': '#BCE100',
+    '#2fb3ff,#f945a6': '#3B99B8', '#bfff10,#ff4d01': '#D78D47',
+    '#bfff10,#e084f4': '#6C7DEE', '#bfff10,#f5f500': '#DDE415',
+    '#bfff10,#f945a6': '#FD7CDD', '#e084f4,#ff4d01': '#C5010E',
+    '#f5f500,#ff4d01': '#FF8001', '#f945a6,#ff4d01': '#C5010E',
+    '#e084f4,#f5f500': '#ED67C9', '#e084f4,#f945a6': '#C739A8',
+    '#f5f500,#f945a6': '#F9CF45'
+  };
+
+  function getOverlapColor(c1, c2) {
+    var a = c1.toLowerCase(), b = c2.toLowerCase();
+    var key = a < b ? a + ',' + b : b + ',' + a;
+    return OVERLAP_COLORS[key] || null;
+  }
+
+  // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 

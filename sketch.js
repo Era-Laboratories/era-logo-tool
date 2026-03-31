@@ -3928,18 +3928,17 @@ function exportPaperBezierToP5(pathShape, colorObj, strokeWeight, buffer, rectBe
 }
 
 // Helper function to convert a bezier path with stroke to a filled outline shape
-function bezierPathToOutline(path, strokeWidth) {
+function bezierPathToOutline(path, strokeWidth, lowRes) {
   if (!path || !path.segments || path.segments.length < 2) return null;
-  
+
   // Create an outline by offsetting the path on both sides
   // We'll create a closed shape that represents the stroke as a filled area
-  
+
   const halfWidth = strokeWidth / 2;
-  // Increase sample rate for smoother, higher-resolution outlines
-  // Calculate based on path length to maintain consistent quality
   const pathLength = path.length;
-  const samplesPerUnit = 1; // Sample points per unit of path length
-  const numSamples = Math.max(50, Math.ceil(pathLength * samplesPerUnit)); // Minimum 50 samples, scale with path length
+  // Low-res mode for intersection computation (much faster boolean ops)
+  const samplesPerUnit = lowRes ? 0.15 : 1;
+  const numSamples = Math.max(lowRes ? 12 : 50, Math.ceil(pathLength * samplesPerUnit));
   
   // Sample points along the path with their normals
   const points = [];
@@ -3991,12 +3990,12 @@ function bezierPathToOutline(path, strokeWidth) {
 }
 
 // Helper function to convert Paper.js shape to path for boolean operations
-function shapeToPath(shape, strokeWidth) {
+function shapeToPath(shape, strokeWidth, lowRes) {
   if (!shape) return null;
-  
+
   // If it's a bezier path, convert it to a filled outline first
   if (shape instanceof paper.Path && strokeWidth) {
-    const outline = bezierPathToOutline(shape, strokeWidth);
+    const outline = bezierPathToOutline(shape, strokeWidth, lowRes);
     if (outline) return outline;
     // If outline creation failed, fall through to return the path as-is
   }
@@ -4744,11 +4743,11 @@ function drawHands() {
           }
           // Update stroke width
           paperShapes[i][key].strokeWidth = rectWidth;
-          // Store updated bezier path for potential transition
-          if (paperShapes[i][key].lastBezierPath) {
-            paperShapes[i][key].lastBezierPath.remove();
+          // Only clone for transition when rectBezOrCircle is approaching circle state
+          if (paperShapes[i][key].rectBezOrCircle > 0.1) {
+            if (paperShapes[i][key].lastBezierPath) paperShapes[i][key].lastBezierPath.remove();
+            paperShapes[i][key].lastBezierPath = paperShape.clone();
           }
-          paperShapes[i][key].lastBezierPath = paperShape.clone();
         }
       }
       
@@ -4803,14 +4802,17 @@ function drawHands() {
     if (showIntersections) {
       const fingerNames = Object.keys(FINGER_TIPS);
       const fingerShapes = [];
-      
-      // Collect all valid finger shapes for this hand
+
+      // Pre-compute low-res outline paths per finger (not per pair — avoids redundant calls)
       for (let fingerName of fingerNames) {
         if (paperShapes[i] && paperShapes[i][fingerName] && paperShapes[i][fingerName].shape) {
+          const sd = paperShapes[i][fingerName];
+          const outlinePath = shapeToPath(sd.shape, sd.strokeWidth, true); // lowRes for fast boolean ops
           fingerShapes.push({
             name: fingerName,
-            shape: paperShapes[i][fingerName].shape,
-            shapeData: paperShapes[i][fingerName] // Store full shape data for access to stroke width, etc.
+            shape: sd.shape,
+            path: outlinePath, // pre-computed outline
+            shapeData: sd
           });
         }
       }
@@ -4823,22 +4825,19 @@ function drawHands() {
       // Compute intersection for each pair of finger shapes
       for (let j = 0; j < fingerShapes.length; j++) {
         for (let k = j + 1; k < fingerShapes.length; k++) {
-          const shape1 = fingerShapes[j].shape;
-          const shape2 = fingerShapes[k].shape;
+          const path1 = fingerShapes[j].path;
+          const path2 = fingerShapes[k].path;
+          if (!path1 || !path2) continue;
+
+          // Fast bounding box pre-check — skip pairs that can't possibly overlap
+          if (!path1.bounds.intersects(path2.bounds)) continue;
+
           const shapeData1 = fingerShapes[j].shapeData;
           const shapeData2 = fingerShapes[k].shapeData;
-
-          // Get colors of the two shapes
           const color1 = shapeData1 ? shapeData1.color : null;
           const color2 = shapeData2 ? shapeData2.color : null;
 
           try {
-            // Convert shapes to paths if needed (pass stroke width for bezier paths)
-            const path1 = shapeToPath(shape1, shapeData1 ? shapeData1.strokeWidth : null);
-            const path2 = shapeToPath(shape2, shapeData2 ? shapeData2.strokeWidth : null);
-
-            if (path1 && path2) {
-              // Clone paths for intersection (boolean operations modify the original)
               const path1Clone = path1.clone();
               const path2Clone = path2.clone();
 
