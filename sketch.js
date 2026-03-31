@@ -286,7 +286,6 @@ function fixOverlapColors(buf) {
   if (!MULTIPLY_TO_BRAND) buildMultiplyLookup();
   if (MULTIPLY_TO_BRAND.length === 0) return;
   const ctx = buf.drawingContext;
-  // Use actual backing store dimensions (accounts for retina/HiDPI pixel density)
   const cvs = ctx.canvas;
   const w = cvs.width, h = cvs.height;
   const imgData = ctx.getImageData(0, 0, w, h);
@@ -294,18 +293,20 @@ function fixOverlapColors(buf) {
   const tol = OVERLAP_TOLERANCE;
   const lookups = MULTIPLY_TO_BRAND;
   const n = lookups.length;
+  let changed = false;
   for (let px = 0; px < d.length; px += 4) {
-    if (d[px + 3] < 128) continue; // skip transparent/semi-transparent pixels
+    if (d[px + 3] < 128) continue;
     const r = d[px], g = d[px + 1], b = d[px + 2];
     for (let li = 0; li < n; li++) {
       const l = lookups[li];
       if (Math.abs(r - l.mr) <= tol && Math.abs(g - l.mg) <= tol && Math.abs(b - l.mb) <= tol) {
         d[px] = l.br; d[px + 1] = l.bg; d[px + 2] = l.bb;
+        changed = true;
         break;
       }
     }
   }
-  ctx.putImageData(imgData, 0, 0);
+  if (changed) ctx.putImageData(imgData, 0, 0);
 }
 
 // Helper function to get intersection color from two source colors
@@ -2922,9 +2923,10 @@ function windowResized() {
 function draw() {
   drawBackgroundLayer();
 	const _m0 = getHandFillMode(0), _m1 = getHandFillMode(1);
-	const _isMulticolorMode = (_m0 === 'brand' || _m0 === 'standardized') && (_m1 === 'brand' || _m1 === 'standardized');
-	// Use MULTIPLY whenever we need overlap detection (showIntersections) or for multicolor modes
-	const _useMultiply = _isMulticolorMode || showIntersections;
+	const _isPaletteMode = (c) => c === 'brand' || c === 'standardized' || (typeof c === 'string' && c.startsWith('#') && !c.startsWith('texture:'));
+	// Use MULTIPLY when fills are palette colors (overlap colors are meaningful)
+	// Skip for texture fills, white, or non-color modes
+	const _useMultiply = showIntersections && _isPaletteMode(_m0) && _isPaletteMode(_m1);
 	handsBuffer.blendMode(_useMultiply ? MULTIPLY : BLEND);
   
   // Manual hand detection with frame skipping (non-blocking)
@@ -3045,7 +3047,8 @@ function draw() {
   handDrawTargets = null; // reset after drawing
 
   // Replace multiply-blended overlap pixels with exact brand overlap colors
-  if (showIntersections && _useMultiply) {
+  // Only run when hands are visible and multiply blend is active
+  if (showIntersections && _useMultiply && hands.length > 0) {
     if (needsSplitBuffers) {
       for (let hi = 0; hi < 2; hi++) {
         if (perHandBuffers[hi]) fixOverlapColors(perHandBuffers[hi]);
@@ -4234,6 +4237,11 @@ function drawHands() {
       pipPositionVelocities[i] = {};
     }
     
+    // Cache per-hand values outside the finger loop
+    const cachedRawScale = getSmoothedRawHandScale(i);
+    const cachedScaleMultiplier = cachedRawScale / 100;
+    const cachedShapeScale = bigHands ? BIG_HANDS_SCALE : 1;
+
     // Draw each finger
     for (let finger in FINGER_TIPS) {
       let tipIndex = FINGER_TIPS[finger];
@@ -4348,12 +4356,7 @@ function drawHands() {
       let pipY = lerpedPipPositions[i][key].y;
       
       // Calculate rectangle dimensions
-      // Width follows smoothed hand scale so thickness matches eased joint motion
-      let rawScale = getSmoothedRawHandScale(i);
-      // Scale raw scale to reasonable multiplier (raw scale is typically 50-200 pixels)
-      let scaleMultiplier = rawScale / 100;
-      const shapeScale = bigHands ? BIG_HANDS_SCALE : 1;
-      let rectWidth = strokeWeight * scaleMultiplier * mlCanvasScale * shapeScale;
+      let rectWidth = strokeWeight * cachedScaleMultiplier * mlCanvasScale * cachedShapeScale;
       let rectHeight = dist(baseX, baseY, tipX, tipY);
       
       // Calculate finger's relative length (finger length / raw scale)
