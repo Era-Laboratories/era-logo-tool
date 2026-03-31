@@ -16,7 +16,11 @@
     '#bfff10,#f945a6': '#FD7CDD', '#e084f4,#ff4d01': '#C5010E',
     '#f5f500,#ff4d01': '#FF8001', '#f945a6,#ff4d01': '#C5010E',
     '#e084f4,#f5f500': '#ED67C9', '#e084f4,#f945a6': '#C739A8',
-    '#f5f500,#f945a6': '#F9CF45'
+    '#f5f500,#f945a6': '#F9CF45',
+    '#5af2af,#5af2af': '#00D580', '#2fb3ff,#2fb3ff': '#2D8AD7',
+    '#bfff10,#bfff10': '#B3EE10', '#ff4d01,#ff4d01': '#D32A00',
+    '#e084f4,#e084f4': '#C75ADF', '#f5f500,#f5f500': '#E1E100',
+    '#f945a6,#f945a6': '#E3047C'
   };
 
   function getOverlapColor(c1, c2) {
