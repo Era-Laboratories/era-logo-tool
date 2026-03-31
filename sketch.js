@@ -4869,10 +4869,8 @@ function drawHands() {
         handBoundingBoxes[i] = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
       }
     }
-
-    }
   }
-  
+
   // Clean up positions, colors, and Paper.js shapes for hands that are no longer detected
   for (let handIndex in lerpedPositions) {
     if (parseInt(handIndex) >= bufferedHands.length) {
