@@ -4815,6 +4815,11 @@ function drawHands() {
         }
       }
       
+      // Switch to BLEND mode for intersections so brand overlap colors
+      // are drawn opaque on top (not multiplied against existing shapes)
+      const prevBlendMode = hBuf.drawingContext.globalCompositeOperation;
+      hBuf.blendMode(BLEND);
+
       // Compute intersection for each pair of finger shapes
       for (let j = 0; j < fingerShapes.length; j++) {
         for (let k = j + 1; k < fingerShapes.length; k++) {
@@ -4822,36 +4827,36 @@ function drawHands() {
           const shape2 = fingerShapes[k].shape;
           const shapeData1 = fingerShapes[j].shapeData;
           const shapeData2 = fingerShapes[k].shapeData;
-          
+
           // Get colors of the two shapes
           const color1 = shapeData1 ? shapeData1.color : null;
           const color2 = shapeData2 ? shapeData2.color : null;
-          
+
           try {
             // Convert shapes to paths if needed (pass stroke width for bezier paths)
             const path1 = shapeToPath(shape1, shapeData1 ? shapeData1.strokeWidth : null);
             const path2 = shapeToPath(shape2, shapeData2 ? shapeData2.strokeWidth : null);
-            
+
             if (path1 && path2) {
               // Clone paths for intersection (boolean operations modify the original)
               const path1Clone = path1.clone();
               const path2Clone = path2.clone();
-              
+
               // Compute intersection
               const intersection = path1Clone.intersect(path2Clone);
-              
+
               if (intersection && intersection.segments && intersection.segments.length > 0) {
                 // Determine intersection color from the two source colors
                 let intersectionColor = '#000000'; // Default to black
                 if (color1 && color2 && typeof color1 === 'string' && typeof color2 === 'string') {
                   intersectionColor = getIntersectionColor(color1, color2);
                 }
-                
+
                 // Ensure we have a valid color (fallback to black)
                 if (!intersectionColor || typeof intersectionColor !== 'string') {
                   intersectionColor = '#000000';
                 }
-                
+
                 // Export intersection to p5 with mapped color
                 exportPaperPathToP5(intersection, hBuf, intersectionColor);
                 
@@ -4873,6 +4878,9 @@ function drawHands() {
           }
         }
       }
+
+      // Restore previous blend mode
+      hBuf.drawingContext.globalCompositeOperation = prevBlendMode;
     }
   }
   
