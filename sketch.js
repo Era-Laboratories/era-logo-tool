@@ -21,7 +21,7 @@ let fingerColors = {}; // Store assigned colors for each hand's fingers
 let debugMode = false; // Global debug mode (toggled with 'd' key)
 let debugHandDetection = false; // Debug mode for hand detection (checkbox)
 let showRawHandData = false; // Show raw hand data points
-let showIntersections = false; // Show intersection/overlap zones (default true to maintain current behavior)
+let showIntersections = true; // Show intersection/overlap zones with brand overlap colors
 let enableDrawHands = true; // Enable drawing hands (default true to maintain current behavior)
 let normalizeHands = true; // Normalize hand positions to center of canvas
 let multicolor = true; // Finger fills use palette; off = #000000
@@ -1451,6 +1451,7 @@ function handleTextureUpload(file, forHand) {
 /** Export the current hand shapes as an SVG file. */
 function exportSVG() {
   const group = new paper.Group();
+  const allShapes = []; // collect for intersection computation
   // Gather all visible finger shapes across all hands
   for (let handIdx in paperShapes) {
     for (let fingerName in paperShapes[handIdx]) {
@@ -1462,6 +1463,25 @@ function exportSVG() {
       clone.fillColor = sd.color || '#000000';
       clone.strokeColor = null;
       group.addChild(clone);
+      allShapes.push({ path: clone, color: sd.color || '#000000' });
+    }
+  }
+  // Compute pairwise intersections with brand overlap colors
+  for (let j = 0; j < allShapes.length; j++) {
+    for (let k = j + 1; k < allShapes.length; k++) {
+      try {
+        const intColor = getIntersectionColor(allShapes[j].color, allShapes[k].color);
+        if (!intColor || intColor === '#000000') continue;
+        const p1 = allShapes[j].path.clone();
+        const p2 = allShapes[k].path.clone();
+        const intersection = p1.intersect(p2);
+        if (intersection && intersection.segments && intersection.segments.length > 0) {
+          intersection.fillColor = intColor;
+          intersection.strokeColor = null;
+          group.addChild(intersection);
+        } else if (intersection) { intersection.remove(); }
+        p1.remove(); p2.remove();
+      } catch (e) { /* skip invalid intersection */ }
     }
   }
   // Mirror horizontally to match the displayed output (canvas is mirrored)
@@ -1786,6 +1806,9 @@ function resolveKeyframePair(loopT) {
   return { kfA, kfB, segT };
 }
 
+/** Lazily-created buffer for animation preview (MULTIPLY blend). */
+let animPreviewBuffer = null;
+
 /** Draw the animation preview frame. Returns the current loopT (0-1) for playhead. */
 function drawAnimPreview() {
   if (animKeyframes.length < 1) return 0;
@@ -1795,10 +1818,15 @@ function drawAnimPreview() {
   if (!pair) return 0;
   const { kfA, kfB, segT } = pair;
 
-  push();
-  translate(width, 0);
-  scale(-1, 1);
-  // Iterate union of both keyframes' hands/fingers
+  // Draw to an offscreen buffer with MULTIPLY blend (matches live view overlap behavior)
+  if (!animPreviewBuffer || animPreviewBuffer.width !== width || animPreviewBuffer.height !== height) {
+    if (animPreviewBuffer) animPreviewBuffer.remove();
+    animPreviewBuffer = createGraphics(width, height);
+  }
+  animPreviewBuffer.clear();
+  animPreviewBuffer.blendMode(MULTIPLY);
+
+  // Draw all finger shapes to the buffer
   const allHands = new Set([...Object.keys(kfA.hands), ...Object.keys(kfB.hands)]);
   for (const hi of allHands) {
     const allFingers = new Set([
@@ -1810,11 +1838,90 @@ function drawAnimPreview() {
       const fB = kfB.hands[hi] && kfB.hands[hi][fn];
       if (!fA && !fB) continue;
       const p = fA && fB ? lerpFingerParams(fA, fB, segT) : (fA || fB);
-      drawFingerFromParams(p);
+      drawFingerFromParamsToBuffer(animPreviewBuffer, p);
     }
   }
+
+  // Composite buffer onto main canvas, mirrored
+  push();
+  translate(width, 0);
+  scale(-1, 1);
+  image(animPreviewBuffer, 0, 0);
   pop();
   return loopT;
+}
+
+/** Draw a finger shape to a p5.Graphics buffer (same as drawFingerFromParams but on a buffer). */
+function drawFingerFromParamsToBuffer(buf, p) {
+  const c = color(p.color);
+  const rbc = p.rectBezOrCircle;
+  const dx = p.tipX - p.baseX, dy = p.tipY - p.baseY;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const ang = len > 0.001 ? Math.atan2(dy, dx) : 0;
+
+  if (rbc >= 0.5) {
+    const fullDiam = p.rectWidth * 1.28;
+    const fullR = fullDiam / 2;
+    const tp = (rbc - 0.5) * 2;
+    const br = (fullR / 2) + (fullR / 2) * tp;
+    const edge = p.rectWidth + (fullDiam - p.rectWidth) * tp;
+    const segLen = Math.min(p.rectWidth, len);
+    const dirX = len > 0.001 ? dx / len : 0, dirY = len > 0.001 ? dy / len : 0;
+    const segMidX = p.tipX - (segLen / 2) * dirX, segMidY = p.tipY - (segLen / 2) * dirY;
+    const cx = segMidX + (p.tipX - segMidX) * tp;
+    const cy = segMidY + (p.tipY - segMidY) * tp;
+    buf.push();
+    buf.fill(red(c), green(c), blue(c));
+    buf.noStroke();
+    buf.translate(cx, cy);
+    buf.rotate(ang);
+    buf.rectMode(CENTER);
+    buf.rect(0, 0, edge, edge, br);
+    buf.rectMode(CORNER);
+    buf.pop();
+  } else if (rbc >= 0.3) {
+    if (len < 0.001) return;
+    const tp = (rbc - 0.3) / 0.2;
+    const startLen = len * 0.7;
+    const visLen = startLen - (startLen - p.rectWidth) * tp;
+    const fullR = (p.rectWidth * 1.28) / 2;
+    const br = Math.max(0, (fullR / 2) * tp);
+    const dirX = dx / len, dirY = dy / len;
+    const sx = p.tipX - visLen * dirX, sy = p.tipY - visLen * dirY;
+    buf.fill(red(c), green(c), blue(c));
+    buf.noStroke();
+    buf.push();
+    buf.translate((sx + p.tipX) / 2, (sy + p.tipY) / 2);
+    buf.rotate(ang);
+    buf.rectMode(CENTER);
+    buf.rect(0, 0, visLen, p.rectWidth, br);
+    buf.rectMode(CORNER);
+    buf.pop();
+  } else {
+    const { cp1X, cp1Y, cp2X, cp2Y } = computeAnimControlPoints(p);
+    let visPortion = rbc > 0 ? 1.0 - (rbc / 0.3) * 0.3 : 1.0;
+    buf.noFill();
+    buf.strokeCap(SQUARE);
+    buf.stroke(red(c), green(c), blue(c));
+    buf.strokeWeight(p.rectWidth);
+    if (visPortion >= 0.999) {
+      buf.bezier(p.baseX, p.baseY, cp1X, cp1Y, cp2X, cp2Y, p.tipX, p.tipY);
+    } else {
+      const steps = Math.max(20, Math.ceil(len * 2));
+      const startT = 1.0 - visPortion;
+      buf.beginShape();
+      buf.noFill();
+      for (let s = 0; s <= steps; s++) {
+        const t = startT + (1.0 - startT) * (s / steps);
+        const u = 1 - t;
+        buf.curveVertex(
+          u*u*u*p.baseX + 3*u*u*t*cp1X + 3*u*t*t*cp2X + t*t*t*p.tipX,
+          u*u*u*p.baseY + 3*u*u*t*cp1Y + 3*u*t*t*cp2Y + t*t*t*p.tipY
+        );
+      }
+      buf.endShape();
+    }
+  }
 }
 
 /** Normalize a Paper.js path to a fixed-point polygon (for SVG export). */
@@ -2041,7 +2148,7 @@ function exportAnimatedSVG() {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
 <style>${style}</style>
 <rect width="100%" height="100%" fill="#fff"/>
-<g transform="scale(-1,1) translate(-${width},0)">${paths}</g>
+<g transform="scale(-1,1) translate(-${width},0)" style="mix-blend-mode:multiply">${paths}</g>
 </svg>`;
 
   const blob = new Blob([svg], { type: 'image/svg+xml' });
