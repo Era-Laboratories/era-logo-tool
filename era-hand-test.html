@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Era Hand Widget Playground</title>
+    <script src="era-hand.js"></script>
+    <style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 2rem;
+            line-height: 1.6;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+            background: linear-gradient(90deg, #2FB3FF, #5AF2AF, #BFFF10, #E084F4, #F5F557, #F945A6, #FF4D01);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        @media (max-width: 640px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: #16213e;
+            border: 1px solid #2a2a4a;
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .panel h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #ccc;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-size: 0.75rem;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-block;
+            padding: 0.6rem 1.25rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+            margin: 0.25rem;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-blue    { background: #2FB3FF; color: #0a0a1a; }
+        .btn-green   { background: #5AF2AF; color: #0a0a1a; }
+        .btn-lime    { background: #BFFF10; color: #0a0a1a; }
+        .btn-purple  { background: #E084F4; color: #0a0a1a; }
+        .btn-yellow  { background: #F5F557; color: #0a0a1a; }
+        .btn-pink    { background: #F945A6; color: #fff; }
+        .btn-red     { background: #FF4D01; color: #fff; }
+
+        .btn-outline {
+            background: transparent;
+            border: 2px solid #2FB3FF;
+            color: #2FB3FF;
+        }
+
+        .btn-outline:hover {
+            background: #2FB3FF;
+            color: #0a0a1a;
+        }
+
+        /* Links */
+        .links a {
+            color: #2FB3FF;
+            text-decoration: none;
+            margin-right: 1rem;
+            font-size: 0.9rem;
+            transition: color 0.15s;
+        }
+
+        .links a:hover {
+            color: #5AF2AF;
+            text-decoration: underline;
+        }
+
+        /* Draggable */
+        .draggable {
+            width: 120px;
+            height: 80px;
+            background: linear-gradient(135deg, #E084F4, #F945A6);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.8rem;
+            color: #fff;
+            user-select: none;
+            position: relative;
+            cursor: grab;
+        }
+
+        .draggable:active {
+            cursor: grabbing;
+        }
+
+        .draggable.dragging {
+            opacity: 0.85;
+            box-shadow: 0 8px 24px rgba(233, 132, 244, 0.4);
+        }
+
+        /* Card */
+        .card {
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            border-radius: 10px;
+            padding: 1.25rem;
+            transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-3px);
+            border-color: #5AF2AF;
+            box-shadow: 0 6px 20px rgba(90, 242, 175, 0.15);
+        }
+
+        .card h3 {
+            font-size: 1rem;
+            color: #5AF2AF;
+            margin-bottom: 0.5rem;
+        }
+
+        .card p {
+            font-size: 0.85rem;
+            color: #999;
+        }
+
+        /* Info panel */
+        .info {
+            grid-column: 1 / -1;
+            background: #0f3460;
+            border: 1px solid #2FB3FF33;
+            border-radius: 12px;
+            padding: 1.5rem;
+            font-size: 0.85rem;
+            color: #aac;
+        }
+
+        .info h2 {
+            color: #2FB3FF;
+        }
+
+        .info code {
+            background: #1a1a2e;
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: #BFFF10;
+        }
+
+        .info ul {
+            margin: 0.75rem 0;
+            padding-left: 1.25rem;
+        }
+
+        .info li {
+            margin-bottom: 0.35rem;
+        }
+
+        .note {
+            grid-column: 1 / -1;
+            background: #2a1a3e;
+            border: 1px solid #E084F466;
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            font-size: 0.8rem;
+            color: #c8a;
+        }
+
+        .note strong {
+            color: #E084F4;
+        }
+
+        .touch-note {
+            grid-column: 1 / -1;
+            text-align: center;
+            font-size: 0.75rem;
+            color: #555;
+            padding: 0.5rem;
+        }
+
+        .text-sample {
+            font-size: 0.9rem;
+            color: #bbb;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="grid">
+
+        <!-- Header -->
+        <div style="grid-column: 1 / -1; text-align: center; padding-bottom: 0.5rem;">
+            <h1>Era Hand Widget Playground</h1>
+            <p class="subtitle">Test EraHand cursor poses on interactive elements</p>
+        </div>
+
+        <!-- Buttons -->
+        <div class="panel">
+            <h2>Buttons</h2>
+            <div>
+                <button class="btn btn-blue">Primary</button>
+                <button class="btn btn-green">Success</button>
+                <button class="btn btn-red">Danger</button>
+            </div>
+            <div style="margin-top: 0.75rem;">
+                <button class="btn btn-purple">Action</button>
+                <button class="btn btn-outline">Outline</button>
+                <button class="btn btn-yellow">Highlight</button>
+            </div>
+        </div>
+
+        <!-- Links -->
+        <div class="panel">
+            <h2>Links</h2>
+            <div class="links" style="margin-bottom: 1rem;">
+                <a href="#">Home</a>
+                <a href="#">About</a>
+                <a href="#">Contact</a>
+            </div>
+            <div class="links">
+                <a href="#">Documentation</a>
+                <a href="#">GitHub</a>
+            </div>
+            <p class="text-sample" style="margin-top: 1.25rem;">
+                Hover over links and buttons to see the <strong style="color:#BFFF10">pointer</strong> pose.
+                The default cursor uses the <strong style="color:#5AF2AF">open</strong> pose.
+            </p>
+        </div>
+
+        <!-- Draggable -->
+        <div class="panel">
+            <h2>Draggable Element</h2>
+            <div class="draggable" id="draggable-box">
+                Drag me
+            </div>
+            <p class="text-sample" style="margin-top: 1rem;">
+                Hovering shows the <strong style="color:#F945A6">grab</strong> pose.
+            </p>
+        </div>
+
+        <!-- Card -->
+        <div class="panel">
+            <h2>Card Component</h2>
+            <div class="card">
+                <h3>Hover Card</h3>
+                <p>This card lifts on hover with a green border glow. The cursor stays in the default open pose since it is not a clickable or draggable target.</p>
+            </div>
+        </div>
+
+        <!-- Text -->
+        <div class="panel" style="grid-column: 1 / -1;">
+            <h2>Text Content</h2>
+            <p class="text-sample">
+                This is a regular paragraph of text. The Era Hand widget replaces the
+                default system cursor with an SVG hand rendered from captured finger poses.
+                Each pose defines five fingers (thumb, index, middle, ring, pinky) with
+                parameters like <code>rectBezOrCircle</code> (0 = rectangle/extended,
+                1 = circle/curled), position offsets, size, rotation, and color.
+                The widget listens for <code>mousemove</code> events and swaps poses
+                based on CSS-selector hover rules.
+            </p>
+        </div>
+
+        <!-- Info panel -->
+        <div class="info">
+            <h2>How It Works</h2>
+            <ul>
+                <li><strong>Default pose:</strong> <code>open</code> -- all fingers extended (rbc near 0), spread out from center</li>
+                <li><strong>Over links/buttons:</strong> <code>pointer</code> -- index finger extended, others curled</li>
+                <li><strong>Over .draggable:</strong> <code>grab</code> -- all fingers curled inward</li>
+            </ul>
+            <p>
+                Hover rules are set with <code>hand.on('a, button', 'pointer')</code> and
+                <code>hand.on('.draggable', 'grab')</code>. The widget matches the element
+                under the cursor against registered selectors and picks the first matching pose.
+            </p>
+        </div>
+
+        <!-- Replacement note -->
+        <div class="note">
+            <strong>Developer note:</strong> The pose data below uses hardcoded placeholder
+            finger positions. Capture real poses in the
+            <a href="index.html" style="color:#E084F4;">logo tool</a> and paste the JSON
+            here to replace the placeholder data.
+        </div>
+
+        <!-- Touch note -->
+        <div class="touch-note">
+            Touch devices: the hand cursor is hidden on touch input.
+            The widget listens for <code>touchstart</code> to disable itself and
+            falls back to native touch behavior.
+        </div>
+
+    </div>
+
+    <script>
+    // -- Draggable box logic ---------------------------------------------------
+    (function () {
+        const box = document.getElementById('draggable-box');
+        let isDragging = false;
+        let offsetX = 0, offsetY = 0;
+
+        box.addEventListener('mousedown', function (e) {
+            isDragging = true;
+            box.classList.add('dragging');
+            const rect = box.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (!isDragging) return;
+            box.style.position = 'absolute';
+            box.style.left = (e.clientX - offsetX) + 'px';
+            box.style.top = (e.clientY - offsetY) + 'px';
+        });
+
+        document.addEventListener('mouseup', function () {
+            isDragging = false;
+            box.classList.remove('dragging');
+        });
+    })();
+
+    // -- Placeholder pose data -------------------------------------------------
+    //
+    // Each pose defines fingers for hand index 0.
+    // Finger params:
+    //   x, y        — offset from hand center (normalized, roughly -1 to 1)
+    //   size         — relative finger size (0.5 to 1.5)
+    //   rbc          — rectBezOrCircle: 0 = extended/rectangle, 1 = curled/circle
+    //   angle        — rotation in degrees
+    //   color        — fill color
+    //
+    // Replace these with real captured data from the logo tool.
+
+    // Helper: generate finger params from tip position, angle, and length
+    function mkFinger(tipX, tipY, angle, len, rw, rbc, rob, color) {
+      var rad = angle * Math.PI / 180;
+      var bx = tipX - Math.cos(rad) * len;
+      var by = tipY - Math.sin(rad) * len;
+      var px = (tipX + bx) / 2 + Math.sin(rad) * 2; // slight PIP offset
+      var py = (tipY + by) / 2 - Math.cos(rad) * 2;
+      return { tipX: tipX, tipY: tipY, baseX: bx, baseY: by, pipX: px, pipY: py,
+               rectWidth: rw, rectBezOrCircle: rbc, rectOrBez: rob, color: color };
+    }
+
+    var W = 14; // base finger width
+    var POSES = {
+        open: {
+            refSize: 220,
+            fingers: { 0: {
+              thumb:  mkFinger(-55, -10, -60, W*2, W*0.9, 0.0, 0.2, "#2FB3FF"),
+              index:  mkFinger(-25, -75, -80, W*2, W,     0.0, 0.1, "#BFFF10"),
+              middle: mkFinger(  5, -80, -88, W*2, W*1.1, 0.0, 0.1, "#FF4D01"),
+              ring:   mkFinger( 30, -72, -95, W*2, W,     0.0, 0.1, "#E084F4"),
+              pinky:  mkFinger( 50, -58,-105, W*2, W*0.8, 0.0, 0.15,"#F5F557")
+            }}
+        },
+        pointer: {
+            refSize: 220,
+            fingers: { 0: {
+              thumb:  mkFinger(-40,  10, -50, W*2, W*0.9, 0.85, 0.0, "#2FB3FF"),
+              index:  mkFinger(-10, -85, -85, W*2, W,     0.0,  0.1, "#BFFF10"),
+              middle: mkFinger( 15,   5, -80, W*2, W*1.1, 0.9,  0.0, "#FF4D01"),
+              ring:   mkFinger( 30,  10, -90, W*2, W,     0.9,  0.0, "#E084F4"),
+              pinky:  mkFinger( 45,  18,-100, W*2, W*0.8, 0.85, 0.0, "#F5F557")
+            }}
+        },
+        grab: {
+            refSize: 220,
+            fingers: { 0: {
+              thumb:  mkFinger(-35,   5, -45, W*2, W*0.9, 0.85, 0.0, "#2FB3FF"),
+              index:  mkFinger(-15, -15, -70, W*2, W,     0.85, 0.0, "#BFFF10"),
+              middle: mkFinger(  8, -20, -80, W*2, W*1.1, 0.9,  0.0, "#FF4D01"),
+              ring:   mkFinger( 28, -15, -90, W*2, W,     0.9,  0.0, "#E084F4"),
+              pinky:  mkFinger( 42,  -5,-100, W*2, W*0.8, 0.85, 0.0, "#F5F557")
+            }}
+        }
+    };
+
+    // -- Initialize EraHand ----------------------------------------------------
+    //
+    // EraHand is loaded from era-hand.js. If the script hasn't been created yet,
+    // this block will fail silently so the page still renders as a static preview.
+
+    (function () {
+        if (typeof EraHand === 'undefined') {
+            console.warn(
+                '[era-hand-test] EraHand is not defined. ' +
+                'Make sure era-hand.js exists and exports the EraHand class.'
+            );
+            return;
+        }
+
+        var hand = EraHand.create({
+            poses: POSES,
+            defaultPose: 'open'
+        });
+
+        // Hover rules
+        hand.on('a, button', 'pointer');
+        hand.on('.draggable', 'grab');
+
+        console.log('[era-hand-test] EraHand initialized with poses:', Object.keys(POSES));
+    })();
+    </script>
+
+</body>
+</html>

@@ -97,6 +97,9 @@ let animPreview = false; // when true, plays back keyframes instead of live hand
 let animPreviewStart = 0; // millis() when preview started
 const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 
+// Widget pose library
+let widgetPoses = {}; // { poseName: { fingers: {handIdx: {fingerName: params}}, refSize: number } }
+
 // Paper.js shape storage - stores Paper.js shapes per hand and finger
 let paperShapes = {}; // Structure: paperShapes[handIndex][fingerName] = { shape: paperObject, type: 'rect'|'circle'|'bezier', color: colorString }
 
@@ -2032,6 +2035,83 @@ function exportAnimatedSVG() {
   URL.revokeObjectURL(url);
 }
 
+/** Capture current hand shapes as a named pose for the widget.
+ *  Positions are stored relative to the hand centroid for portability. */
+function captureWidgetPose(name) {
+  if (!name) return;
+  const pose = { fingers: {} };
+  let cx = 0, cy = 0, count = 0;
+  // First pass: collect raw data and compute centroid
+  const raw = {};
+  for (let i in paperShapes) {
+    raw[i] = {};
+    for (let finger in paperShapes[i]) {
+      const sd = paperShapes[i][finger];
+      if (!sd || !sd.shape) continue;
+      const tip = lerpedPositions[i] && lerpedPositions[i][finger];
+      const base = lerpedBasePositions[i] && lerpedBasePositions[i][finger];
+      const pip = lerpedPipPositions[i] && lerpedPipPositions[i][finger];
+      if (!tip || !base) continue;
+      const rw = sd.strokeWidth || 30;
+      const db = computeDrawBase(tip.x, tip.y, base.x, base.y, rw);
+      raw[i][finger] = {
+        tipX: tip.x, tipY: tip.y,
+        baseX: db.x, baseY: db.y,
+        pipX: pip ? pip.x : (db.x + tip.x) / 2,
+        pipY: pip ? pip.y : (db.y + tip.y) / 2,
+        rectWidth: rw,
+        rectBezOrCircle: sd.rectBezOrCircle || 0,
+        rectOrBez: sd.rectOrBez || 0,
+        color: sd.color || '#000000'
+      };
+      cx += tip.x; cy += tip.y; count++;
+    }
+  }
+  if (count === 0) return;
+  cx /= count; cy /= count;
+  // Second pass: offset by centroid + compute refSize
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i in raw) {
+    pose.fingers[i] = {};
+    for (let finger in raw[i]) {
+      const r = raw[i][finger];
+      const f = {
+        tipX: r.tipX - cx, tipY: r.tipY - cy,
+        baseX: r.baseX - cx, baseY: r.baseY - cy,
+        pipX: r.pipX - cx, pipY: r.pipY - cy,
+        rectWidth: r.rectWidth,
+        rectBezOrCircle: r.rectBezOrCircle,
+        rectOrBez: r.rectOrBez,
+        color: r.color
+      };
+      pose.fingers[i][finger] = f;
+      minX = Math.min(minX, f.tipX, f.baseX);
+      minY = Math.min(minY, f.tipY, f.baseY);
+      maxX = Math.max(maxX, f.tipX, f.baseX);
+      maxY = Math.max(maxY, f.tipY, f.baseY);
+    }
+  }
+  pose.refSize = Math.max(maxX - minX, maxY - minY) + 60; // padding for stroke width
+  widgetPoses[name] = pose;
+  updatePoseList();
+}
+
+function updatePoseList() {
+  const el = document.getElementById('widget-pose-list');
+  if (!el) return;
+  const names = Object.keys(widgetPoses);
+  el.textContent = names.length === 0 ? 'No poses saved' : names.join(', ');
+}
+
+function exportWidgetPoses() {
+  const json = JSON.stringify({ poses: widgetPoses }, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'era-hand-poses.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function setup() {
   const { width, height } = calculateCanvasSize();
   createCanvas(width, height);
@@ -2417,6 +2497,92 @@ async function setup() {
         },
         {
           type: 'fieldset',
+          id: 'tab-widget',
+          legend: 'Widget',
+          plain: true,
+          controls: [
+            {
+              type: 'section',
+              label: 'Capture Poses'
+            },
+            {
+              type: 'group',
+              className: 'cotton-cp-export-stack',
+              controls: [
+                {
+                  type: 'button',
+                  id: 'widget-capture-open',
+                  label: 'Save as "open"',
+                  variant: 'primary',
+                  block: true,
+                  medium: true,
+                  onClick: () => { captureWidgetPose('open'); }
+                },
+                {
+                  type: 'button',
+                  id: 'widget-capture-pointer',
+                  label: 'Save as "pointer"',
+                  variant: 'secondary',
+                  block: true,
+                  onClick: () => { captureWidgetPose('pointer'); }
+                },
+                {
+                  type: 'button',
+                  id: 'widget-capture-grab',
+                  label: 'Save as "grab"',
+                  variant: 'secondary',
+                  block: true,
+                  onClick: () => { captureWidgetPose('grab'); }
+                },
+                {
+                  type: 'button',
+                  id: 'widget-capture-custom',
+                  label: 'Save as custom name...',
+                  variant: 'secondary',
+                  block: true,
+                  onClick: () => {
+                    const name = prompt('Pose name:');
+                    if (name && name.trim()) captureWidgetPose(name.trim());
+                  }
+                }
+              ]
+            },
+            {
+              type: 'section',
+              id: 'widget-pose-list',
+              label: 'No poses saved'
+            },
+            {
+              type: 'section',
+              label: 'Export'
+            },
+            {
+              type: 'group',
+              className: 'cotton-cp-export-stack',
+              controls: [
+                {
+                  type: 'button',
+                  id: 'widget-export-json',
+                  label: 'Export Poses (JSON)',
+                  variant: 'primary',
+                  block: true,
+                  medium: true,
+                  onClick: () => { exportWidgetPoses(); }
+                },
+                {
+                  type: 'button',
+                  id: 'widget-open-test',
+                  label: 'Open Test Playground',
+                  variant: 'secondary',
+                  block: true,
+                  onClick: () => { window.open('era-hand-test.html', '_blank'); }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          type: 'fieldset',
           id: 'debug-controls',
           legend: 'Debugging',
           hidden: true,
@@ -2496,7 +2662,8 @@ async function setup() {
     const tabs = [
       { label: 'Look', fieldsets: ['tab-logo', 'tab-fill', 'tab-bg'] },
       { label: 'Export', fieldsets: ['tab-export'] },
-      { label: 'Animate', fieldsets: ['tab-anim'] }
+      { label: 'Animate', fieldsets: ['tab-anim'] },
+      { label: 'Widget', fieldsets: ['tab-widget'] }
     ];
     const allFieldsetIds = tabs.flatMap(t => t.fieldsets);
     const tabBar = document.createElement('div');

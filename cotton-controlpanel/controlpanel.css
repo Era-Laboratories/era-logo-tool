@@ -620,7 +620,8 @@ body {
 
 /* Hide legends on single-section tabs — tab bar already shows the name */
 #tab-export > .cotton-cp-legend,
-#tab-anim > .cotton-cp-legend {
+#tab-anim > .cotton-cp-legend,
+#tab-widget > .cotton-cp-legend {
   display: none;
 }
 
