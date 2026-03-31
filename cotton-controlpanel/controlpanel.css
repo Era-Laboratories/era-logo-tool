@@ -120,12 +120,16 @@ body {
   margin-top: var(--cp-gap-section);
 }
 
-/* Bordered fieldset (e.g. debug) */
+/* Bordered fieldset (e.g. debug, nested sub-sections) */
 .cotton-cp-fieldset:not(.cotton-cp-fieldset--plain) {
   border: 1px solid var(--cp-line);
   border-radius: var(--cp-radius-frame);
   padding: 12px;
-  margin: 0;
+  margin: 12px 0 0 0;
+}
+
+.cotton-cp-fieldset:not(.cotton-cp-fieldset--plain):first-child {
+  margin-top: 0;
 }
 
 .cotton-cp-fieldset:not(.cotton-cp-fieldset--plain) > .cotton-cp-legend {
@@ -403,6 +407,10 @@ body {
 }
 
 /* Swatches */
+.cotton-cp-swatches {
+  margin-top: 10px;
+}
+
 .cotton-cp-swatches-row {
   display: flex;
   flex-wrap: wrap;
@@ -579,7 +587,27 @@ body {
 }
 
 .cotton-cp-actions {
-  margin-top: 0;
+  margin-top: 10px;
+}
+
+.cotton-cp-export-stack + .cotton-cp-actions,
+.cotton-cp-export-stack + .cotton-cp-row {
+  margin-top: 10px;
+}
+
+/* Standalone buttons after sections or other controls */
+.cotton-cp-section + .cotton-cp-actions {
+  margin-top: 4px;
+}
+
+/* Ensure toggles after sliders have breathing room */
+.cotton-cp-slider + .cotton-cp-check {
+  margin-top: 12px;
+}
+
+/* Space between adjacent export stacks */
+.cotton-cp-export-stack + .cotton-cp-export-stack {
+  margin-top: 6px;
 }
 
 /* Tabs */
