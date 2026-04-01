@@ -95,6 +95,48 @@ let animPreview = false; // when true, plays back keyframes instead of live hand
 let animPreviewStart = 0; // millis() when preview started
 const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 
+// Demo hand mode — shows the 5-circle logo pattern
+let demoHandActive = false;
+
+/** Generate fake hand landmarks (21 points in ML 640×480 space)
+ *  with all 5 finger tips positioned as the Era logo dot pattern.
+ *  Finger joints are clustered near tips to produce circles. */
+function getDemoHandLandmarks() {
+  // Tip positions in ML space (mirrored so they display correctly)
+  // Matches the 5-dot logo: blue(thumb), lime(index), red(middle), purple(ring), yellow(pinky)
+  const tips = {
+    thumb:  [540, 350],
+    index:  [455, 155],
+    middle: [330, 85],
+    ring:   [205, 135],
+    pinky:  [105, 290]
+  };
+  const wrist = [320, 420];
+  const landmarks = [];
+  // 0: wrist
+  landmarks[0] = [wrist[0], wrist[1], 0];
+  // For each finger, cluster MCP/PIP/DIP/TIP near the tip (produces circles)
+  const fingerOrder = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  const startIndices = [1, 5, 9, 13, 17]; // starting landmark index per finger
+  for (let f = 0; f < 5; f++) {
+    const tx = tips[fingerOrder[f]][0], ty = tips[fingerOrder[f]][1];
+    // Direction from tip toward wrist (for slight offset of base joints)
+    const dx = wrist[0] - tx, dy = wrist[1] - ty;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const nx = len > 0 ? dx / len : 0, ny = len > 0 ? dy / len : 0;
+    const si = startIndices[f];
+    // MCP: 12px toward wrist from tip
+    landmarks[si]     = [tx + nx * 12, ty + ny * 12, 0];
+    // PIP: 8px toward wrist
+    landmarks[si + 1] = [tx + nx * 8, ty + ny * 8, 0];
+    // DIP: 4px toward wrist
+    landmarks[si + 2] = [tx + nx * 4, ty + ny * 4, 0];
+    // TIP: at the dot position
+    landmarks[si + 3] = [tx, ty, 0];
+  }
+  return [{ landmarks, handInViewConfidence: 1.0 }];
+}
+
 // Widget pose library
 let widgetPoses = {}; // { poseName: { fingers: {handIdx: {fingerName: params}}, refSize: number } }
 let widgetPreviewInstance = null; // live EraHand instance for preview
@@ -2417,6 +2459,18 @@ async function setup() {
           plain: true,
           controls: [
             {
+              type: 'button',
+              id: 'demo-hand-btn',
+              label: 'Demo Hand',
+              variant: 'secondary',
+              block: true,
+              onClick: () => {
+                demoHandActive = !demoHandActive;
+                const btn = document.getElementById('demo-hand-btn');
+                if (btn) btn.textContent = demoHandActive ? 'Stop Demo' : 'Demo Hand';
+              }
+            },
+            {
               type: 'checkbox',
               id: 'normalizeHands',
               label: 'Pin logo to center',
@@ -3091,9 +3145,14 @@ function draw() {
         // Add the new detection to buffer
         addToHandBuffer(newHands);
         
-        // Update state
+        // Update state — if real hands detected, auto-disable demo
+        if (newHands.length > 0 && demoHandActive) {
+          demoHandActive = false;
+          const btn = document.getElementById('demo-hand-btn');
+          if (btn) btn.textContent = 'Demo Hand';
+        }
         hands = newHands;
-        lastDetectedHands = JSON.parse(JSON.stringify(newHands)); // Deep copy
+        lastDetectedHands = JSON.parse(JSON.stringify(newHands));
         skippedFramesCount = 0;
         isDetecting = false;
       }).catch(error => {
@@ -3105,6 +3164,12 @@ function draw() {
       });
   }
   
+  // Inject demo hand when active and no real hands detected
+  if (demoHandActive && hands.length === 0) {
+    hands = getDemoHandLandmarks();
+    addToHandBuffer(hands);
+  }
+
   // Determine if hands need separate buffers (different textures)
   const tex0 = getTextureForHand(0), tex1 = getTextureForHand(1);
   const needsSplitBuffers = handFillSplitHands && (tex0 || tex1);
