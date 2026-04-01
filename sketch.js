@@ -4042,12 +4042,10 @@ function calculateNormalizeOffset(bufferedHands, layout) {
     const avgX = sumX / landmarks.length;
     const avgY = sumY / landmarks.length;
     
-    // Use EMA-smoothed scale after calibration to prevent tip jitter.
-    // During calibration, use instantaneous scale so landmarks are stable enough
-    // for the stability check to pass (smoothed scale depends on updateHandCloseness
-    // which hasn't run yet on the first frames).
-    const hand0Calibrated = getCalibrationState(0).isCalibrated;
-    const currentRawScale = hand0Calibrated ? getSmoothedRawHandScale(i) : computeHandScale(landmarks, i);
+    // Use EMA-smoothed scale to prevent tip jitter from ML noise amplification.
+    // Falls back to instantaneous scale if smoothed isn't available yet.
+    const smoothed = getSmoothedRawHandScale(i);
+    const currentRawScale = smoothed > 0 ? smoothed : computeHandScale(landmarks, i);
 
     const targetRawScale = 100;
     let scaleFactor = 1.0;
@@ -4163,35 +4161,33 @@ function drawHands() {
 
   // Get buffered hands (delayed by handBufferFrames)
   let bufferedHands = getBufferedHands();
-  
-  // Calculate normalization offset if enabled
-  const normalizeResult = calculateNormalizeOffset(bufferedHands, layout);
-  const normalizeOffsetX = normalizeResult.offsetX;
-  const normalizeOffsetY = normalizeResult.offsetY;
-  bufferedHands = normalizeResult.hands;
-  
-  // Calibration logic - only calibrate first hand (hand 0), use for all hands
+
+  // Calibration uses RAW landmarks (before normalization) so the stability
+  // check isn't thrown off by normalization scale fluctuations
   const hand0State = getCalibrationState(0);
   if (bufferedHands.length > 0) {
     if (!hand0State.isCalibrated) {
       if (!hand0State.isCalibrating) {
         hand0State.isCalibrating = true;
-        hand0State.stabilityBuffer = []; // Reset stability buffer
+        hand0State.stabilityBuffer = [];
       }
-      
-      // Try to calibrate first hand only
       const calibrated = calibrateHandScale(bufferedHands[0].landmarks, 0);
       if (calibrated) {
         console.log("Hand scale calibrated successfully! (using for all hands)");
       }
     }
   } else {
-    // No hand detected - reset calibration buffer if calibrating
     if (hand0State.isCalibrating && !hand0State.isCalibrated) {
       hand0State.stabilityBuffer = [];
     }
   }
-  
+
+  // Normalize AFTER calibration so calibration sees raw stable landmarks
+  const normalizeResult = calculateNormalizeOffset(bufferedHands, layout);
+  const normalizeOffsetX = normalizeResult.offsetX;
+  const normalizeOffsetY = normalizeResult.offsetY;
+  bufferedHands = normalizeResult.hands;
+
   // Update hand closeness system for each detected hand
   for (let i = 0; i < bufferedHands.length; i++) {
     // (landmarks are in video space, which is what we want for scale calculation)
