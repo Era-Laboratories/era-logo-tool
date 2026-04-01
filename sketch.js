@@ -115,7 +115,7 @@ let backgroundMediaObjectUrl = null;
 let backgroundMediaLoadToken = 0;
 let nomediaImg;
 /** @type {'plain'|'webcam'|'greenscreen'|'uploaded'} */
-let backgroundMode = 'plain';
+let backgroundMode = 'webcam';
 
 
 // ============================================================================
@@ -4162,23 +4162,24 @@ function drawHands() {
   // Get buffered hands (delayed by handBufferFrames)
   let bufferedHands = getBufferedHands();
 
-  // Calibration uses RAW landmarks (before normalization) so the stability
-  // check isn't thrown off by normalization scale fluctuations
+  // Auto-calibrate on first hand detection (skip stability check)
   const hand0State = getCalibrationState(0);
-  if (bufferedHands.length > 0) {
-    if (!hand0State.isCalibrated) {
-      if (!hand0State.isCalibrating) {
-        hand0State.isCalibrating = true;
-        hand0State.stabilityBuffer = [];
-      }
-      const calibrated = calibrateHandScale(bufferedHands[0].landmarks, 0);
-      if (calibrated) {
-        console.log("Hand scale calibrated successfully! (using for all hands)");
-      }
-    }
-  } else {
-    if (hand0State.isCalibrating && !hand0State.isCalibrated) {
-      hand0State.stabilityBuffer = [];
+  if (bufferedHands.length > 0 && !hand0State.isCalibrated) {
+    // Immediately calibrate using first available frame
+    const landmarks = bufferedHands[0].landmarks;
+    if (landmarks && landmarks.length >= 21) {
+      hand0State.cleanDistances = collectPalmDistances(landmarks);
+      const wrist = landmarks[HAND_CLOSENESS.WRIST];
+      const indexMCP = landmarks[HAND_CLOSENESS.INDEX_MCP];
+      const middleMCP = landmarks[HAND_CLOSENESS.MIDDLE_MCP];
+      const pinkyMCP = landmarks[HAND_CLOSENESS.PINKY_MCP];
+      const palmWidth = dist2D(indexMCP, pinkyMCP);
+      const palmLength = dist2D(wrist, middleMCP);
+      const wristToIndex = dist2D(wrist, indexMCP);
+      const wristToPinky = dist2D(wrist, pinkyMCP);
+      hand0State.cleanRawScale = (palmWidth + palmLength + wristToIndex + wristToPinky) / 4;
+      hand0State.isCalibrated = true;
+      hand0State.isCalibrating = false;
     }
   }
 
