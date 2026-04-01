@@ -4359,14 +4359,14 @@ function drawHands() {
       
       // Calculate finger's relative length (finger length / raw scale)
       let fingerRelativeLength = 1.0; // Default value
-      if (rawScale > 0) {
+      if (cachedRawScale > 0) {
         // Get actual finger length from landmarks (in video space, then scale to canvas)
         let tipIndex = FINGER_TIPS[finger];
         let baseIndex = FINGER_BASES[finger];
         let tipLandmark = landmarks[tipIndex];
         let baseLandmark = landmarks[baseIndex];
         let fingerLengthPixels = dist2D(tipLandmark, baseLandmark);
-        fingerRelativeLength = fingerLengthPixels / rawScale;
+        fingerRelativeLength = fingerLengthPixels / cachedRawScale;
       }
       
       // Calculate angle at PIP joint between base, PIP, and tip
@@ -4389,7 +4389,7 @@ function drawHands() {
       
       let baseToPipDistance = dist2D(baseLandmark, pipLandmark);
       let tipToPipDistance = dist2D(tipLandmark, pipLandmark);
-      let minDistanceThreshold = rawScale * 0.2; // 20% of raw scale
+      let minDistanceThreshold = cachedRawScale * 0.2; // 20% of raw scale
       
       let distancesSufficient = baseToPipDistance >= minDistanceThreshold && 
                                 tipToPipDistance >= minDistanceThreshold;
