@@ -2262,6 +2262,25 @@ function toggleWidgetPreview(on) {
   }
 }
 
+function exportWidgetBundle() {
+  if (Object.keys(widgetPoses).length === 0) {
+    console.warn('No poses captured');
+    return;
+  }
+  // Fetch the engine source, append poses, download as one file
+  fetch('era-hand.js').then(r => r.text()).then(engineSrc => {
+    const poses = JSON.stringify({ poses: widgetPoses });
+    const bundle = engineSrc + '\n\n// --- Embedded poses ---\nwindow.EraHandPoses = ' + poses + ';\n';
+    const blob = new Blob([bundle], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'era-hand-bundle.js';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
 function exportWidgetPoses() {
   const json = JSON.stringify({ poses: widgetPoses }, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
@@ -2774,6 +2793,14 @@ async function setup() {
                 a.download = 'era-hand.js';
                 a.click();
               }
+            },
+            {
+              type: 'button',
+              id: 'widget-export-bundle',
+              label: 'Export Bundle (JS + Poses)',
+              variant: 'secondary',
+              block: true,
+              onClick: () => { exportWidgetBundle(); }
             }
           ]
         },
