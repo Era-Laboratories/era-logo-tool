@@ -1458,11 +1458,84 @@ function handleTextureUpload(file, forHand) {
   });
 }
 
-/** Export the current hand shapes as an SVG file. */
+/** Get the combined bounding box of all hands (in handsBuffer space, before mirroring). */
+function getAllHandsBounds() {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < handBoundingBoxes.length; i++) {
+    const bb = handBoundingBoxes[i];
+    if (!bb) continue;
+    minX = Math.min(minX, bb.x); minY = Math.min(minY, bb.y);
+    maxX = Math.max(maxX, bb.x + bb.w); maxY = Math.max(maxY, bb.y + bb.h);
+  }
+  if (minX >= Infinity) return null;
+  // Clamp to canvas
+  minX = Math.max(0, Math.floor(minX));
+  minY = Math.max(0, Math.floor(minY));
+  maxX = Math.min(width, Math.ceil(maxX));
+  maxY = Math.min(height, Math.ceil(maxY));
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/** Save PNG of just the hand shapes on transparent background, cropped to bounding box. */
+function saveCroppedPNG() {
+  const bb = getAllHandsBounds();
+  if (!bb) { saveCroppedPNG(); return; }
+  // The handsBuffer has shapes (already with textures/overlaps applied).
+  // Mirror it (same as display) then crop to the mirrored bounding box.
+  const mirroredBB = { x: width - bb.x - bb.w, y: bb.y, w: bb.w, h: bb.h };
+  const tempCanvas = document.createElement('canvas');
+  const pd = pixelDensity();
+  tempCanvas.width = mirroredBB.w * pd;
+  tempCanvas.height = mirroredBB.h * pd;
+  const tempCtx = tempCanvas.getContext('2d');
+  // Draw the mirrored handsBuffer, offset to crop
+  tempCtx.scale(pd, pd);
+  tempCtx.translate(-mirroredBB.x, -mirroredBB.y);
+  tempCtx.translate(width, 0);
+  tempCtx.scale(-1, 1);
+  tempCtx.drawImage(handsBuffer.drawingContext.canvas, 0, 0, width, height);
+  // Download
+  const a = document.createElement('a');
+  a.href = tempCanvas.toDataURL('image/png');
+  a.download = 'hand-tracking.png';
+  a.click();
+}
+
+/** Export SVG of just the hand shapes, cropped to bounding box.
+ *  For texture/video fills, embeds a rasterized image.
+ *  For solid colors, exports vector paths. */
 function exportSVG() {
+  const bb = getAllHandsBounds();
+  const mirroredBB = bb ? { x: width - bb.x - bb.w, y: bb.y, w: bb.w, h: bb.h } : { x: 0, y: 0, w: width, h: height };
+  const anyTexture = handNeedsTexture(0) || handNeedsTexture(1);
+
+  if (anyTexture) {
+    // Texture/video fills can't be represented as vector — rasterize the handsBuffer
+    const pd = pixelDensity();
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = mirroredBB.w * pd;
+    tempCanvas.height = mirroredBB.h * pd;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.scale(pd, pd);
+    tempCtx.translate(-mirroredBB.x, -mirroredBB.y);
+    tempCtx.translate(width, 0);
+    tempCtx.scale(-1, 1);
+    tempCtx.drawImage(handsBuffer.drawingContext.canvas, 0, 0, width, height);
+    const dataUrl = tempCanvas.toDataURL('image/png');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${mirroredBB.w} ${mirroredBB.h}" width="${mirroredBB.w}" height="${mirroredBB.h}">
+<image width="${mirroredBB.w}" height="${mirroredBB.h}" xlink:href="${dataUrl}"/>
+</svg>`;
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'hand-tracking.svg'; a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  // Vector export for solid color fills
   const group = new paper.Group();
-  const allShapes = []; // collect for intersection computation
-  // Gather all visible finger shapes across all hands
+  const allShapes = [];
   for (let handIdx in paperShapes) {
     for (let fingerName in paperShapes[handIdx]) {
       const sd = paperShapes[handIdx][fingerName];
@@ -1476,7 +1549,7 @@ function exportSVG() {
       allShapes.push({ path: clone, color: sd.color || '#000000' });
     }
   }
-  // Compute pairwise intersections with brand overlap colors
+  // Pairwise intersections with brand overlap colors
   for (let j = 0; j < allShapes.length; j++) {
     for (let k = j + 1; k < allShapes.length; k++) {
       try {
@@ -1491,39 +1564,26 @@ function exportSVG() {
           group.addChild(intersection);
         } else if (intersection) { intersection.remove(); }
         p1.remove(); p2.remove();
-      } catch (e) { /* skip invalid intersection */ }
+      } catch (e) { /* skip */ }
     }
   }
-  // Export the group as SVG (no Paper.js transforms — mirroring done in SVG)
-  // Apply mirror transform via an SVG <g> wrapper instead of Paper.js transforms
-  // (Paper.js exportSVG can lose transforms when children are extracted)
   const svgStr = group.exportSVG({ asString: true });
+  // Crop viewBox to mirrored bounding box
   const svgRoot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svgRoot.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  svgRoot.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-  svgRoot.setAttribute('width', width);
-  svgRoot.setAttribute('height', height);
-  // Background
-  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  bg.setAttribute('width', '100%');
-  bg.setAttribute('height', '100%');
-  bg.setAttribute('fill', '#ffffff');
-  svgRoot.appendChild(bg);
-  // Mirror wrapper — flip horizontally to match the displayed view
+  svgRoot.setAttribute('viewBox', mirroredBB.x + ' ' + mirroredBB.y + ' ' + mirroredBB.w + ' ' + mirroredBB.h);
+  svgRoot.setAttribute('width', mirroredBB.w);
+  svgRoot.setAttribute('height', mirroredBB.h);
   const mirrorG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   mirrorG.setAttribute('transform', 'scale(-1,1) translate(-' + width + ',0)');
   mirrorG.innerHTML = svgStr;
   svgRoot.appendChild(mirrorG);
-  // Download
   const svgOutput = new XMLSerializer().serializeToString(svgRoot);
   const blob = new Blob([svgOutput], { type: 'image/svg+xml' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = 'hand-tracking.svg';
-  a.click();
+  a.href = url; a.download = 'hand-tracking.svg'; a.click();
   URL.revokeObjectURL(url);
-  // Clean up
   group.remove();
 }
 
@@ -2534,7 +2594,7 @@ async function setup() {
                     const delay = parseInt(panel.values.saveDelay, 10) || 0;
                     saveCountdownDelay = delay;
                     savePendingAction = 'png';
-                    if (delay === 0) { saveCanvas('hand-tracking', 'png'); savePendingAction = null; }
+                    if (delay === 0) { saveCroppedPNG(); savePendingAction = null; }
                     else { saveCountdown = delay; saveCountdownStartTime = millis(); }
                   }
                 },
@@ -3202,7 +3262,7 @@ function draw() {
       saveCountdown = remaining;
     } else {
       saveCountdown = -1;
-      if (savePendingAction === 'png') saveCanvas('hand-tracking', 'png');
+      if (savePendingAction === 'png') saveCroppedPNG();
       else if (savePendingAction === 'svg') exportSVG();
       else if (savePendingAction === 'record') startRecording();
       savePendingAction = null;
