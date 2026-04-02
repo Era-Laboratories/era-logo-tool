@@ -100,10 +100,9 @@ let demoHandActive = false;
 
 /** Generate fake hand landmarks (21 points in ML 640×480 space)
  *  with all 5 finger tips positioned as the Era logo dot pattern.
- *  Finger joints are clustered near tips to produce circles. */
+ *  Palm joints are realistically positioned near center; tips curled close to palm. */
 function getDemoHandLandmarks() {
   // Tip positions in ML space (mirrored so they display correctly)
-  // Matches the 5-dot logo: blue(thumb), lime(index), red(middle), purple(ring), yellow(pinky)
   const tips = {
     thumb:  [540, 350],
     index:  [455, 155],
@@ -111,28 +110,29 @@ function getDemoHandLandmarks() {
     ring:   [205, 135],
     pinky:  [105, 290]
   };
-  const wrist = [320, 420];
+  // Palm center and realistic MCP positions (close together, like a real palm)
+  const palm = [320, 280];
+  const mcps = {
+    thumb:  [410, 310],
+    index:  [370, 250],
+    middle: [330, 240],
+    ring:   [290, 250],
+    pinky:  [250, 270]
+  };
   const landmarks = [];
-  // 0: wrist
-  landmarks[0] = [wrist[0], wrist[1], 0];
-  // For each finger, cluster MCP/PIP/DIP/TIP near the tip (produces circles)
+  landmarks[0] = [palm[0], palm[1] + 60, 0]; // wrist below palm
   const fingerOrder = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-  const startIndices = [1, 5, 9, 13, 17]; // starting landmark index per finger
+  const startIndices = [1, 5, 9, 13, 17];
   for (let f = 0; f < 5; f++) {
-    const tx = tips[fingerOrder[f]][0], ty = tips[fingerOrder[f]][1];
-    // Direction from tip toward wrist (for slight offset of base joints)
-    const dx = wrist[0] - tx, dy = wrist[1] - ty;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    const nx = len > 0 ? dx / len : 0, ny = len > 0 ? dy / len : 0;
+    const fn = fingerOrder[f];
+    const tx = tips[fn][0], ty = tips[fn][1];
+    const mx = mcps[fn][0], my = mcps[fn][1];
     const si = startIndices[f];
-    // MCP: 12px toward wrist from tip
-    landmarks[si]     = [tx + nx * 12, ty + ny * 12, 0];
-    // PIP: 8px toward wrist
-    landmarks[si + 1] = [tx + nx * 8, ty + ny * 8, 0];
-    // DIP: 4px toward wrist
-    landmarks[si + 2] = [tx + nx * 4, ty + ny * 4, 0];
-    // TIP: at the dot position
-    landmarks[si + 3] = [tx, ty, 0];
+    landmarks[si]     = [mx, my, 0];                                         // MCP (base)
+    // PIP and DIP: curl toward tip (close to tip, producing circles)
+    landmarks[si + 1] = [tx + (mx - tx) * 0.15, ty + (my - ty) * 0.15, 0];  // PIP
+    landmarks[si + 2] = [tx + (mx - tx) * 0.08, ty + (my - ty) * 0.08, 0];  // DIP
+    landmarks[si + 3] = [tx, ty, 0];                                         // TIP
   }
   return [{ landmarks, handInViewConfidence: 1.0 }];
 }
