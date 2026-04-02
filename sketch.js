@@ -98,6 +98,25 @@ const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 // Demo hand mode — shows the 5-circle logo pattern
 let demoHandActive = false;
 
+/** Clear all lerped positions, velocities, colors, and Paper.js shapes. */
+function clearHandState() {
+  lerpedPositions = {};
+  lerpedBasePositions = {};
+  lerpedPipPositions = {};
+  positionVelocities = {};
+  basePositionVelocities = {};
+  pipPositionVelocities = {};
+  fingerColors = {};
+  for (let hi in paperShapes) {
+    for (let fn in paperShapes[hi]) {
+      if (paperShapes[hi][fn].shape) paperShapes[hi][fn].shape.remove();
+      if (paperShapes[hi][fn].lastBezierPath) paperShapes[hi][fn].lastBezierPath.remove();
+    }
+  }
+  paperShapes = {};
+  hands = [];
+}
+
 /** Generate fake hand landmarks (21 points in ML 640×480 space)
  *  with all 5 finger tips positioned as the Era logo dot pattern.
  *  Palm joints are realistically positioned near center; tips curled close to palm. */
@@ -2468,6 +2487,7 @@ async function setup() {
                 demoHandActive = !demoHandActive;
                 const btn = document.getElementById('demo-hand-btn');
                 if (btn) btn.textContent = demoHandActive ? 'Stop Demo' : 'Demo Hand';
+                if (!demoHandActive) clearHandState();
               }
             },
             {
@@ -3154,6 +3174,7 @@ function draw() {
           demoHandActive = false;
           const btn = document.getElementById('demo-hand-btn');
           if (btn) btn.textContent = 'Demo Hand';
+          clearHandState();
         }
         hands = newHands;
         lastDetectedHands = JSON.parse(JSON.stringify(newHands));
