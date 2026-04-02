@@ -97,6 +97,7 @@ const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 
 // Demo hand mode — shows the 5-circle logo pattern
 let demoHandActive = false;
+let demoSavedFillMode = null;
 
 /** Clear all lerped positions, velocities, colors, and Paper.js shapes. */
 function clearHandState() {
@@ -115,11 +116,16 @@ function clearHandState() {
   }
   paperShapes = {};
   hands = [];
+  handFrameBuffer = [];
+  // Reset calibration so next hand recalibrates from scratch
+  calibrationState = {};
+  // Reset closeness tracking
+  handClosenessState = {};
 }
 
 /** Generate fake hand landmarks (21 points in ML 640×480 space)
  *  with all 5 finger tips positioned as the Era logo dot pattern.
- *  Palm joints are realistically positioned near center; tips curled close to palm. */
+ *  Base joints are very close to tips so fingerRelativeLength < circleThreshold → circles form. */
 function getDemoHandLandmarks() {
   // Tip positions in ML space (mirrored so they display correctly)
   const tips = {
@@ -129,29 +135,30 @@ function getDemoHandLandmarks() {
     ring:   [205, 135],
     pinky:  [105, 290]
   };
-  // Palm center and realistic MCP positions (close together, like a real palm)
-  const palm = [320, 280];
-  const mcps = {
-    thumb:  [410, 310],
-    index:  [370, 250],
-    middle: [330, 240],
-    ring:   [290, 250],
-    pinky:  [250, 270]
-  };
+  // Palm center for wrist and realistic MCP spread (determines rawScale)
+  const wrist = [320, 340];
+  // MCPs must be: (a) close together for reasonable rawScale, AND
+  // (b) close enough to tips that fingerRelativeLength < circleThreshold.
+  // circleThreshold ≈ 0.55 * fingerMultiplier. rawScale ≈ 100.
+  // So base-to-tip must be < 100 * 0.55 * mult ≈ 30-55px depending on finger.
+  // Place each MCP just 25px from its tip (toward palm center).
   const landmarks = [];
-  landmarks[0] = [palm[0], palm[1] + 60, 0]; // wrist below palm
+  landmarks[0] = [wrist[0], wrist[1], 0];
   const fingerOrder = ['thumb', 'index', 'middle', 'ring', 'pinky'];
   const startIndices = [1, 5, 9, 13, 17];
   for (let f = 0; f < 5; f++) {
     const fn = fingerOrder[f];
     const tx = tips[fn][0], ty = tips[fn][1];
-    const mx = mcps[fn][0], my = mcps[fn][1];
+    // Direction from tip toward wrist
+    const dx = wrist[0] - tx, dy = wrist[1] - ty;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const nx = len > 0 ? dx / len : 0, ny = len > 0 ? dy / len : 0;
     const si = startIndices[f];
-    landmarks[si]     = [mx, my, 0];                                         // MCP (base)
-    // PIP and DIP: curl toward tip (close to tip, producing circles)
-    landmarks[si + 1] = [tx + (mx - tx) * 0.15, ty + (my - ty) * 0.15, 0];  // PIP
-    landmarks[si + 2] = [tx + (mx - tx) * 0.08, ty + (my - ty) * 0.08, 0];  // DIP
-    landmarks[si + 3] = [tx, ty, 0];                                         // TIP
+    // All joints clustered within 25px of tip → very short finger → circle
+    landmarks[si]     = [tx + nx * 25, ty + ny * 25, 0]; // MCP (base)
+    landmarks[si + 1] = [tx + nx * 15, ty + ny * 15, 0]; // PIP
+    landmarks[si + 2] = [tx + nx * 8,  ty + ny * 8,  0]; // DIP
+    landmarks[si + 3] = [tx, ty, 0];                      // TIP
   }
   return [{ landmarks, handInViewConfidence: 1.0 }];
 }
@@ -2487,7 +2494,17 @@ async function setup() {
                 demoHandActive = !demoHandActive;
                 const btn = document.getElementById('demo-hand-btn');
                 if (btn) btn.textContent = demoHandActive ? 'Stop Demo' : 'Demo Hand';
-                if (!demoHandActive) clearHandState();
+                if (demoHandActive) {
+                  // Force standardized colors so the logo pattern is correct
+                  demoSavedFillMode = handFillSelection[0];
+                  handFillSelection[0] = 'standardized';
+                  handFillSelection[1] = 'standardized';
+                  clearHandState();
+                } else {
+                  handFillSelection[0] = demoSavedFillMode || 'brand';
+                  handFillSelection[1] = demoSavedFillMode || 'brand';
+                  clearHandState();
+                }
               }
             },
             {
@@ -3174,6 +3191,8 @@ function draw() {
           demoHandActive = false;
           const btn = document.getElementById('demo-hand-btn');
           if (btn) btn.textContent = 'Demo Hand';
+          handFillSelection[0] = demoSavedFillMode || 'brand';
+          handFillSelection[1] = demoSavedFillMode || 'brand';
           clearHandState();
         }
         hands = newHands;
