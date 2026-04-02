@@ -117,10 +117,6 @@ function clearHandState() {
   paperShapes = {};
   hands = [];
   handFrameBuffer = [];
-  // Reset calibration so next hand recalibrates from scratch
-  calibrationState = {};
-  // Reset closeness tracking
-  handClosenessState = {};
 }
 
 /** Generate fake hand landmarks (21 points in ML 640×480 space)
