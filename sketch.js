@@ -124,12 +124,13 @@ function clearHandState() {
  *  Base joints are very close to tips so fingerRelativeLength < circleThreshold → circles form. */
 function getDemoHandLandmarks() {
   // Tip positions in ML space (mirrored so they display correctly)
+  // Thumb stays; 4 fingers shifted right in ML space (left on screen) for more thumb-index gap
   const tips = {
     thumb:  [540, 350],
-    index:  [455, 155],
-    middle: [330, 85],
-    ring:   [205, 135],
-    pinky:  [105, 290]
+    index:  [420, 145],
+    middle: [290, 75],
+    ring:   [165, 125],
+    pinky:  [70, 275]
   };
   // Palm center for wrist and realistic MCP spread (determines rawScale)
   const wrist = [320, 340];
@@ -1783,7 +1784,9 @@ function captureKeyframe() {
 function redistributeKeyframeTimes() {
   const n = animKeyframes.length;
   if (n < 2) { if (n === 1) animKeyframes[0].t = 0; return; }
-  for (let i = 0; i < n; i++) animKeyframes[i].t = i / (n - 1);
+  // Space evenly with room for the return-to-first segment
+  // e.g., 3 keyframes → t = 0, 0.333, 0.667 (last 0.333 is return to first)
+  for (let i = 0; i < n; i++) animKeyframes[i].t = i / n;
 }
 
 function updateKeyframeCountLabel() {
@@ -1925,14 +1928,19 @@ function resolveKeyframePair(loopT) {
   const n = animKeyframes.length;
   if (n === 0) return null;
   if (n === 1) return { kfA: animKeyframes[0], kfB: animKeyframes[0], segT: 0 };
-  let idx = 0;
+  // Find which segment we're in (including the wrap-around segment from last→first)
+  let idx = n - 1; // default to last segment (wrap-around)
   for (let i = 0; i < n - 1; i++) {
-    if (animKeyframes[i].t <= loopT) idx = i;
+    if (loopT >= animKeyframes[i].t && loopT < animKeyframes[i + 1].t) { idx = i; break; }
   }
   const kfA = animKeyframes[idx];
-  const kfB = animKeyframes[Math.min(idx + 1, n - 1)];
-  const segLen = kfB.t - kfA.t;
-  let segT = segLen > 0.001 ? (loopT - kfA.t) / segLen : 0;
+  // Next keyframe wraps around to the first
+  const kfB = idx < n - 1 ? animKeyframes[idx + 1] : animKeyframes[0];
+  // Segment length (wraps: last keyframe t to 1.0, then 0.0 to first keyframe t)
+  const segStart = kfA.t;
+  const segEnd = idx < n - 1 ? kfB.t : 1.0;
+  const segLen = segEnd - segStart;
+  let segT = segLen > 0.001 ? (loopT - segStart) / segLen : 0;
   segT = Math.max(0, Math.min(1, segT));
   segT = segT * segT * (3 - 2 * segT); // smooth-step
   return { kfA, kfB, segT };
