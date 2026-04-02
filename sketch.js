@@ -3071,7 +3071,11 @@ function draw() {
 	handsBuffer.blendMode(_useMultiply ? MULTIPLY : BLEND);
   
   // Manual hand detection with frame skipping (non-blocking)
-  if (detector && video && video.loadedmetadata && !isDetecting) {
+  // Skip detection when demo hand is active
+  if (demoHandActive) {
+    hands = getDemoHandLandmarks();
+    addToHandBuffer(hands);
+  } else if (detector && video && video.loadedmetadata && !isDetecting) {
       isDetecting = true;
       const vel = video.elt;
       mlInputCtx.drawImage(vel, 0, 0, ML_INPUT_W, ML_INPUT_H);
@@ -3164,12 +3168,6 @@ function draw() {
       });
   }
   
-  // Inject demo hand when active and no real hands detected
-  if (demoHandActive && hands.length === 0) {
-    hands = getDemoHandLandmarks();
-    addToHandBuffer(hands);
-  }
-
   // Determine if hands need separate buffers (different textures)
   const tex0 = getTextureForHand(0), tex1 = getTextureForHand(1);
   const needsSplitBuffers = handFillSplitHands && (tex0 || tex1);
