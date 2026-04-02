@@ -4425,8 +4425,10 @@ function drawHands() {
     }
     
     // Cache per-hand values outside the finger loop
+    // When normalizeHands is on, positions are scaled to targetRawScale=100,
+    // so rectWidth must also use 100 (not the raw scale) to stay proportional.
     const cachedRawScale = getSmoothedRawHandScale(i);
-    const cachedScaleMultiplier = cachedRawScale / 100;
+    const cachedScaleMultiplier = normalizeHands ? 1.0 : (cachedRawScale / 100);
     const cachedShapeScale = bigHands ? BIG_HANDS_SCALE : 1;
 
     // Draw each finger
