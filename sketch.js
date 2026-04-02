@@ -4369,17 +4369,20 @@ function drawHands() {
     }
   }
 
-  // Normalize AFTER calibration so calibration sees raw stable landmarks
+  // Update hand closeness on RAW landmarks (before normalization) so scale
+  // computation is consistent with calibration (also done on raw landmarks)
+  // Also save raw landmarks for fingerRelativeLength computation later
+  const rawLandmarksPerHand = [];
+  for (let i = 0; i < bufferedHands.length; i++) {
+    rawLandmarksPerHand[i] = bufferedHands[i].landmarks;
+    updateHandCloseness(bufferedHands[i].landmarks, i);
+  }
+
+  // Normalize AFTER calibration and closeness so both see raw stable landmarks
   const normalizeResult = calculateNormalizeOffset(bufferedHands, layout);
   const normalizeOffsetX = normalizeResult.offsetX;
   const normalizeOffsetY = normalizeResult.offsetY;
   bufferedHands = normalizeResult.hands;
-
-  // Update hand closeness system for each detected hand
-  for (let i = 0; i < bufferedHands.length; i++) {
-    // (landmarks are in video space, which is what we want for scale calculation)
-    updateHandCloseness(bufferedHands[i].landmarks, i);
-  }
   
   // Decay closeness for hands that are no longer detected
   for (let handIndex in handClosenessState) {
@@ -4544,14 +4547,12 @@ function drawHands() {
       let rectHeight = dist(baseX, baseY, tipX, tipY);
       
       // Calculate finger's relative length (finger length / raw scale)
+      // Uses RAW landmarks (pre-normalization) to match cachedRawScale which is also from raw
       let fingerRelativeLength = 1.0; // Default value
-      if (cachedRawScale > 0) {
-        // Get actual finger length from landmarks (in video space, then scale to canvas)
-        let tipIndex = FINGER_TIPS[finger];
-        let baseIndex = FINGER_BASES[finger];
-        let tipLandmark = landmarks[tipIndex];
-        let baseLandmark = landmarks[baseIndex];
-        let fingerLengthPixels = dist2D(tipLandmark, baseLandmark);
+      if (cachedRawScale > 0 && rawLandmarksPerHand[i]) {
+        let rawTip = rawLandmarksPerHand[i][FINGER_TIPS[finger]];
+        let rawBase = rawLandmarksPerHand[i][FINGER_BASES[finger]];
+        let fingerLengthPixels = dist2D(rawTip, rawBase);
         fingerRelativeLength = fingerLengthPixels / cachedRawScale;
       }
       
@@ -4568,11 +4569,12 @@ function drawHands() {
       let deviationFromStraight = 180 - angle;
       
       // Check if distances from base/tip to PIP are sufficient for bezier
-      // Calculate distances in video space (from original landmarks) for accurate comparison
-      let pipLandmark = landmarks[pipIndex];
-      let baseLandmark = landmarks[baseIndex];
-      let tipLandmark = landmarks[tipIndex];
-      
+      // Use RAW landmarks for distance comparison (consistent with cachedRawScale)
+      let rawLm = rawLandmarksPerHand[i] || landmarks;
+      let pipLandmark = rawLm[pipIndex];
+      let baseLandmark = rawLm[baseIndex];
+      let tipLandmark = rawLm[tipIndex];
+
       let baseToPipDistance = dist2D(baseLandmark, pipLandmark);
       let tipToPipDistance = dist2D(tipLandmark, pipLandmark);
       let minDistanceThreshold = cachedRawScale * 0.2; // 20% of raw scale
