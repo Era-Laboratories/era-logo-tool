@@ -2305,64 +2305,10 @@ function exportAnimatedSVG() {
     }
   }
 
-  // Generate animated overlap paths for each finger pair with a brand overlap color
-  let overlapPaths = '';
-  for (let j = 0; j < commonFingers.length; j++) {
-    for (let k = j + 1; k < commonFingers.length; k++) {
-      const [hiA, fnA] = commonFingers[j].split(':');
-      const [hiB, fnB] = commonFingers[k].split(':');
-      const colorA = animKeyframes[0].hands[hiA][fnA].color;
-      const colorB = animKeyframes[0].hands[hiB][fnB].color;
-      const overlapColor = getIntersectionColor(colorA, colorB);
-      if (!overlapColor || overlapColor === '#000000') continue;
-
-      const safePairId = commonFingers[j].replace(/:/g, '-') + '_' + commonFingers[k].replace(/:/g, '-');
-      style += `@keyframes ov-${safePairId}{`;
-      let firstOvD = null;
-      for (let s = 0; s <= numSamples; s++) {
-        const loopT = s / numSamples;
-        const pct = Math.round(loopT * 100);
-        const pair = resolveKeyframePair(loopT);
-        if (!pair) continue;
-        const fAa = pair.kfA.hands[hiA] && pair.kfA.hands[hiA][fnA];
-        const fBa = pair.kfB.hands[hiA] && pair.kfB.hands[hiA][fnA];
-        const fAb = pair.kfA.hands[hiB] && pair.kfA.hands[hiB][fnB];
-        const fBb = pair.kfB.hands[hiB] && pair.kfB.hands[hiB][fnB];
-        if (!fAa || !fAb) continue;
-        const pA = fBa ? lerpFingerParams(fAa, fBa, pair.segT) : fAa;
-        const pB = fBb ? lerpFingerParams(fAb, fBb, pair.segT) : fAb;
-        // Build Paper.js shapes and intersect
-        const pathA = fingerParamsToSVGPath(pA);
-        const pathB = fingerParamsToSVGPath(pB);
-        if (!pathA || !pathB) continue;
-        // Use Paper.js for boolean intersection
-        try {
-          const ppA = new paper.Path(pathA);
-          const ppB = new paper.Path(pathB);
-          const intersection = ppA.intersect(ppB);
-          if (intersection && intersection.segments && intersection.segments.length > 0) {
-            const ovD = normalizePathForAnimation(intersection);
-            if (ovD) {
-              if (!firstOvD) firstOvD = ovD;
-              style += `${pct}%{d:path("${ovD}")}`;
-            }
-            intersection.remove();
-          }
-          ppA.remove();
-          ppB.remove();
-        } catch (e) { /* skip */ }
-      }
-      style += '}';
-      if (firstOvD) {
-        overlapPaths += `<path fill="${overlapColor}" d="${firstOvD}" style="animation:ov-${safePairId} ${dur}s ease-in-out infinite"/>`;
-      }
-    }
-  }
-
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
 <style>${style}</style>
 <rect width="100%" height="100%" fill="#fff"/>
-<g transform="scale(-1,1) translate(-${width},0)">${paths}${overlapPaths}</g>
+<g transform="scale(-1,1) translate(-${width},0)" style="mix-blend-mode:multiply">${paths}</g>
 </svg>`;
 
   const blob = new Blob([svg], { type: 'image/svg+xml' });
