@@ -221,11 +221,13 @@ function buildFakeLandmarks() {
   // Desired palm center = below the finger centroid
   const palmCX = pcx, palmCY = pcy + 30;
   const startIndices = [1, 5, 9, 13, 17];
-  // Build finger joints first (MCPs near tips for circles)
+  // Build finger joints — MCPs point toward palm center (not tip centroid)
+  // so circles/rectangles face outward from the palm
   for (let f = 0; f < 5; f++) {
     const tx = fakeFingerTips[f].x, ty = fakeFingerTips[f].y;
     const si = startIndices[f];
-    const dx = pcx - tx, dy = pcy - ty;
+    // Direction from tip toward palm center
+    const dx = palmCX - tx, dy = palmCY - ty;
     const len = Math.sqrt(dx * dx + dy * dy) || 1;
     landmarks[si]     = [tx + dx / len * 10, ty + dy / len * 10, 0]; // MCP
     landmarks[si + 1] = [tx + dx / len * 6,  ty + dy / len * 6,  0]; // PIP
