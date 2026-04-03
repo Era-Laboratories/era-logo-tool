@@ -4369,9 +4369,11 @@ function drawHands() {
   bufferedHands = normalizeResult.hands;
 
   // Update hand closeness system for each detected hand
-  for (let i = 0; i < bufferedHands.length; i++) {
-    // (landmarks are in video space, which is what we want for scale calculation)
-    updateHandCloseness(bufferedHands[i].landmarks, i);
+  // Skip in fake hand mode — keep scale frozen so shapes don't resize when dragged
+  if (!fakeHandActive) {
+    for (let i = 0; i < bufferedHands.length; i++) {
+      updateHandCloseness(bufferedHands[i].landmarks, i);
+    }
   }
   
   // Decay closeness for hands that are no longer detected
