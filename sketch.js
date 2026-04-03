@@ -194,11 +194,23 @@ function mlToScreen(mlx, mly) {
 
 function fakeHandHitTest(mx, my) {
   if (!fakeFingerTips) return -1;
-  // Hit test in screen space using the displayed positions
-  for (let i = 0; i < fakeFingerTips.length; i++) {
-    const screen = mlToScreen(fakeFingerTips[i].x, fakeFingerTips[i].y);
-    const dx = mx - screen.x, dy = my - screen.y;
-    if (dx * dx + dy * dy < 2500) return i; // 50px hit radius on screen
+  // Use actual rendered positions from lerpedPositions (post-normalization, mirrored)
+  // These are in buffer space — display mirrors with translate(width,0) + scale(-1,1)
+  // So screen x = width - bufferX
+  for (let i = 0; i < FAKE_FINGER_NAMES.length; i++) {
+    const fn = FAKE_FINGER_NAMES[i];
+    const lp = lerpedPositions[0] && lerpedPositions[0][fn];
+    if (!lp) {
+      // Fallback to ML→screen conversion if not yet in pipeline
+      const screen = mlToScreen(fakeFingerTips[i].x, fakeFingerTips[i].y);
+      const dx = mx - screen.x, dy = my - screen.y;
+      if (dx * dx + dy * dy < 2500) return i;
+      continue;
+    }
+    // lp is in buffer space, display mirrors it
+    const sx = width - lp.x, sy = lp.y;
+    const dx = mx - sx, dy = my - sy;
+    if (dx * dx + dy * dy < 2500) return i;
   }
   return -1;
 }
