@@ -92,9 +92,41 @@ let recordStartTime = 0;
 // Animation keyframe state
 let animKeyframes = []; // [{id, t (0-1), fingers: {handIdx: {fingerName: {pathData, color}}}}]
 let animTotalDuration = 2; // seconds
-let animPreview = false; // when true, plays back keyframes instead of live hands
-let animPreviewStart = 0; // millis() when preview started
-const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
+let animPreview = false;
+let animPreviewStart = 0;
+let animEasingType = 'smooth-step'; // 'linear' | 'ease-in' | 'ease-out' | 'smooth-step' | 'ease-in-out-cubic' | 'custom'
+let animCustomBezier = [0.42, 0, 0.58, 1]; // cubic-bezier control points [x1, y1, x2, y2]
+const ANIM_PATH_POINTS = 48;
+
+/** Apply the selected easing curve to a 0-1 value. */
+function applyAnimEasing(t) {
+  t = Math.max(0, Math.min(1, t));
+  switch (animEasingType) {
+    case 'linear': return t;
+    case 'ease-in': return t * t;
+    case 'ease-out': return t * (2 - t);
+    case 'smooth-step': return t * t * (3 - 2 * t);
+    case 'ease-in-out-cubic': return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    case 'custom': return cubicBezierEase(t, animCustomBezier[0], animCustomBezier[1], animCustomBezier[2], animCustomBezier[3]);
+    default: return t * t * (3 - 2 * t);
+  }
+}
+
+/** Evaluate a cubic-bezier easing curve at time t. */
+function cubicBezierEase(t, x1, y1, x2, y2) {
+  // Newton-Raphson to find the bezier parameter for a given x (time)
+  let guess = t;
+  for (let i = 0; i < 8; i++) {
+    const u = 1 - guess;
+    const bx = 3 * u * u * guess * x1 + 3 * u * guess * guess * x2 + guess * guess * guess;
+    const dbx = 3 * u * u * x1 + 6 * u * guess * (x2 - x1) + 3 * guess * guess * (1 - x2);
+    if (Math.abs(dbx) < 1e-6) break;
+    guess -= (bx - t) / dbx;
+    guess = Math.max(0, Math.min(1, guess));
+  }
+  const u = 1 - guess;
+  return 3 * u * u * guess * y1 + 3 * u * guess * guess * y2 + guess * guess * guess;
+}
 
 // Fake hand mode — substitutes ML detection with draggable fingertip landmarks.
 // Feeds into the SAME pipeline as a real hand. No special overlay, no bypass.
@@ -2030,7 +2062,7 @@ function resolveKeyframePair(loopT) {
   const segLen = segEnd - segStart;
   let segT = segLen > 0.001 ? (loopT - segStart) / segLen : 0;
   segT = Math.max(0, Math.min(1, segT));
-  segT = segT * segT * (3 - 2 * segT); // smooth-step
+  segT = applyAnimEasing(segT);
   return { kfA, kfB, segT };
 }
 
@@ -2898,6 +2930,20 @@ async function setup() {
               label: 'Duration',
               suffix: 's',
               onChange: (v) => { animTotalDuration = v; }
+            },
+            {
+              type: 'select',
+              id: 'animEasing',
+              label: 'Easing',
+              value: animEasingType,
+              options: [
+                { value: 'linear', label: 'Linear' },
+                { value: 'ease-in', label: 'Ease In' },
+                { value: 'ease-out', label: 'Ease Out' },
+                { value: 'smooth-step', label: 'Smooth Step' },
+                { value: 'ease-in-out-cubic', label: 'Ease In-Out Cubic' }
+              ],
+              onChange: (v) => { animEasingType = v; }
             },
             {
               type: 'section',
