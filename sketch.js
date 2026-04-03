@@ -119,22 +119,26 @@ function toggleFakeHand() {
   fakeHandActive = !fakeHandActive;
   const btn = document.getElementById('fake-hand-btn');
   if (btn) btn.textContent = fakeHandActive ? 'Stop Fake Hand' : 'Toggle Fake Hand';
-  if (fakeHandActive) {
-    initFakeHand();
-    // Clear shape state so drawHands rebuilds from fake landmarks fresh
-    // (avoids stale bezier shapes from real hand conflicting with circle-mode data)
-    for (let hi in paperShapes) {
-      for (let fn in paperShapes[hi]) {
-        if (paperShapes[hi][fn].shape) paperShapes[hi][fn].shape.remove();
-        if (paperShapes[hi][fn].lastBezierPath) paperShapes[hi][fn].lastBezierPath.remove();
-      }
+  // Both on and off: clear ALL pipeline state for a clean start.
+  // On activate: prevents stale real-hand beziers conflicting with fake circle data.
+  // On deactivate: prevents fake hand's inflated calibration/closeness values
+  // from making the real hand appear as circles.
+  for (let hi in paperShapes) {
+    for (let fn in paperShapes[hi]) {
+      if (paperShapes[hi][fn].shape) paperShapes[hi][fn].shape.remove();
+      if (paperShapes[hi][fn].lastBezierPath) paperShapes[hi][fn].lastBezierPath.remove();
     }
-    paperShapes = {};
-    lerpedPositions = {};
-    lerpedBasePositions = {};
-    lerpedPipPositions = {};
   }
-  // When toggled off, ML detection resumes and naturally rebuilds everything.
+  paperShapes = {};
+  lerpedPositions = {};
+  lerpedBasePositions = {};
+  lerpedPipPositions = {};
+  calibrationState = {};
+  handClosenessState = {};
+  hands = [];
+  handFrameBuffer = [];
+  isDetecting = false;
+  if (fakeHandActive) initFakeHand();
 }
 
 /** Build 21 ML-format landmarks from draggable fingertip positions.
