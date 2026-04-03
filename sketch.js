@@ -95,69 +95,53 @@ let animPreview = false; // when true, plays back keyframes instead of live hand
 let animPreviewStart = 0; // millis() when preview started
 const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 
-// Demo hand mode — shows the 5-circle logo pattern
+// Demo hand mode — directly draws 5 draggable shapes, bypasses ML pipeline entirely
 let demoHandActive = false;
-let demoSavedFillMode = null;
+let demoDragging = -1; // index of shape being dragged, -1 = none
 
-/** Clear all lerped positions, velocities, colors, and Paper.js shapes. */
-function clearHandState() {
-  lerpedPositions = {};
-  lerpedBasePositions = {};
-  lerpedPipPositions = {};
-  positionVelocities = {};
-  basePositionVelocities = {};
-  pipPositionVelocities = {};
-  fingerColors = {};
-  for (let hi in paperShapes) {
-    for (let fn in paperShapes[hi]) {
-      if (paperShapes[hi][fn].shape) paperShapes[hi][fn].shape.remove();
-      if (paperShapes[hi][fn].lastBezierPath) paperShapes[hi][fn].lastBezierPath.remove();
-    }
-  }
-  paperShapes = {};
-  hands = [];
-  handFrameBuffer = [];
+// 5 demo shapes: position in canvas space, drawn directly (no ML pipeline)
+const DEMO_FINGER_NAMES = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+let demoShapes = null; // initialized on first use
+
+function initDemoShapes() {
+  // Default Era logo dot positions (canvas space, pre-mirror)
+  // These get mirrored when drawn, so left in canvas = right on screen
+  const cw = width, ch = height;
+  demoShapes = [
+    { x: cw * 0.65, y: ch * 0.65, r: 55, color: STANDARDIZED_FINGER_COLORS.thumb,  name: 'thumb' },
+    { x: cw * 0.55, y: ch * 0.30, r: 55, color: STANDARDIZED_FINGER_COLORS.index,  name: 'index' },
+    { x: cw * 0.42, y: ch * 0.18, r: 60, color: STANDARDIZED_FINGER_COLORS.middle, name: 'middle' },
+    { x: cw * 0.28, y: ch * 0.28, r: 55, color: STANDARDIZED_FINGER_COLORS.ring,   name: 'ring' },
+    { x: cw * 0.15, y: ch * 0.55, r: 50, color: STANDARDIZED_FINGER_COLORS.pinky,  name: 'pinky' }
+  ];
 }
 
-/** Generate fake hand landmarks (21 points in ML 640×480 space)
- *  with all 5 finger tips positioned as the Era logo dot pattern.
- *  Base joints are very close to tips so fingerRelativeLength < circleThreshold → circles form. */
-function getDemoHandLandmarks() {
-  // Tip positions in ML space (mirrored so they display correctly)
-  // Thumb stays; 4 fingers shifted right in ML space (left on screen) for more thumb-index gap
-  const tips = {
-    thumb:  [540, 350],
-    index:  [420, 145],
-    middle: [290, 75],
-    ring:   [165, 125],
-    pinky:  [70, 275]
-  };
-  // Palm center for wrist and realistic MCP spread (determines rawScale)
-  const wrist = [320, 340];
-  // MCPs must be: (a) close together for reasonable rawScale, AND
-  // (b) close enough to tips that fingerRelativeLength < circleThreshold.
-  // circleThreshold ≈ 0.55 * fingerMultiplier. rawScale ≈ 100.
-  // So base-to-tip must be < 100 * 0.55 * mult ≈ 30-55px depending on finger.
-  // Place each MCP just 25px from its tip (toward palm center).
-  const landmarks = [];
-  landmarks[0] = [wrist[0], wrist[1], 0];
-  const fingerOrder = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-  const startIndices = [1, 5, 9, 13, 17];
-  for (let f = 0; f < 5; f++) {
-    const fn = fingerOrder[f];
-    const tx = tips[fn][0], ty = tips[fn][1];
-    // Direction from tip toward wrist
-    const dx = wrist[0] - tx, dy = wrist[1] - ty;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    const nx = len > 0 ? dx / len : 0, ny = len > 0 ? dy / len : 0;
-    const si = startIndices[f];
-    // All joints clustered within 25px of tip → very short finger → circle
-    landmarks[si]     = [tx + nx * 25, ty + ny * 25, 0]; // MCP (base)
-    landmarks[si + 1] = [tx + nx * 15, ty + ny * 15, 0]; // PIP
-    landmarks[si + 2] = [tx + nx * 8,  ty + ny * 8,  0]; // DIP
-    landmarks[si + 3] = [tx, ty, 0];                      // TIP
+/** Draw the demo shapes directly to the main canvas (mirrored). */
+function drawDemoHand() {
+  if (!demoShapes) initDemoShapes();
+  push();
+  translate(width, 0);
+  scale(-1, 1);
+  for (const s of demoShapes) {
+    fill(s.color);
+    noStroke();
+    ellipse(s.x, s.y, s.r * 2, s.r * 2);
   }
-  return [{ landmarks, handInViewConfidence: 1.0 }];
+  pop();
+}
+
+/** Check if mouse (in mirrored canvas space) hits a demo shape. Returns index or -1. */
+function demoHitTest(mx, my) {
+  if (!demoShapes) return -1;
+  // Convert screen mouse to unmirrored canvas space
+  const ux = width - mx;
+  const uy = my;
+  for (let i = 0; i < demoShapes.length; i++) {
+    const s = demoShapes[i];
+    const dx = ux - s.x, dy = uy - s.y;
+    if (dx * dx + dy * dy < s.r * s.r) return i;
+  }
+  return -1;
 }
 
 // Widget pose library
@@ -2498,17 +2482,7 @@ async function setup() {
                 demoHandActive = !demoHandActive;
                 const btn = document.getElementById('demo-hand-btn');
                 if (btn) btn.textContent = demoHandActive ? 'Stop Demo' : 'Demo Hand';
-                if (demoHandActive) {
-                  // Force standardized colors so the logo pattern is correct
-                  demoSavedFillMode = handFillSelection[0];
-                  handFillSelection[0] = 'standardized';
-                  handFillSelection[1] = 'standardized';
-                  clearHandState();
-                } else {
-                  handFillSelection[0] = demoSavedFillMode || 'brand';
-                  handFillSelection[1] = demoSavedFillMode || 'brand';
-                  clearHandState();
-                }
+                if (demoHandActive && !demoShapes) initDemoShapes();
               }
             },
             {
@@ -3077,6 +3051,16 @@ async function setup() {
   }
 }
 
+function mousePressed() {
+  if (demoHandActive) {
+    demoDragging = demoHitTest(mouseX, mouseY);
+  }
+}
+
+function mouseReleased() {
+  demoDragging = -1;
+}
+
 function windowResized() {
   const { width: newWidth, height: newHeight } = calculateCanvasSize();
   
@@ -3111,11 +3095,10 @@ function draw() {
 	const _useMultiply = showIntersections && _isPaletteMode(_m0) && _isPaletteMode(_m1);
 	handsBuffer.blendMode(_useMultiply ? MULTIPLY : BLEND);
   
+  // Demo mode: skip entire ML pipeline, draw shapes directly later
   // Manual hand detection with frame skipping (non-blocking)
-  // Skip detection when demo hand is active
   if (demoHandActive) {
-    hands = getDemoHandLandmarks();
-    addToHandBuffer(hands);
+    // Skip ML detection — demo shapes drawn after background
   } else if (detector && video && video.loadedmetadata && !isDetecting) {
       isDetecting = true;
       const vel = video.elt;
@@ -3190,15 +3173,6 @@ function draw() {
         // Add the new detection to buffer
         addToHandBuffer(newHands);
         
-        // Update state — if real hands detected, auto-disable demo
-        if (newHands.length > 0 && demoHandActive) {
-          demoHandActive = false;
-          const btn = document.getElementById('demo-hand-btn');
-          if (btn) btn.textContent = 'Demo Hand';
-          handFillSelection[0] = demoSavedFillMode || 'brand';
-          handFillSelection[1] = demoSavedFillMode || 'brand';
-          clearHandState();
-        }
         hands = newHands;
         lastDetectedHands = JSON.parse(JSON.stringify(newHands));
         skippedFramesCount = 0;
@@ -3215,6 +3189,42 @@ function draw() {
   // Determine if hands need separate buffers (different textures)
   const tex0 = getTextureForHand(0), tex1 = getTextureForHand(1);
   const needsSplitBuffers = handFillSplitHands && (tex0 || tex1);
+
+  // Demo mode: draw shapes directly, skip entire normal pipeline
+  if (demoHandActive) {
+    drawDemoHand();
+    // Handle drag
+    if (demoDragging >= 0 && mouseIsPressed && demoShapes) {
+      demoShapes[demoDragging].x = width - mouseX; // unmirror
+      demoShapes[demoDragging].y = mouseY;
+    }
+    // Skip to end of draw (after the normal pipeline)
+    updateCalibrationOverlay();
+    if (saveCountdown >= 0) {
+      const elapsed = (millis() - saveCountdownStartTime) / 1000;
+      const remaining = Math.ceil(saveCountdownDelay - elapsed);
+      if (remaining > 0) {
+        push(); fill(0); noStroke(); textAlign(LEFT, BOTTOM); textSize(200);
+        text(remaining.toString(), 20, height - 20); pop();
+        saveCountdown = remaining;
+      } else {
+        saveCountdown = -1;
+        if (savePendingAction === 'png') saveCroppedPNG();
+        else if (savePendingAction === 'svg') exportSVG();
+        else if (savePendingAction === 'record') startRecording();
+        savePendingAction = null;
+      }
+    }
+    if (isRecording) {
+      const recElapsed = (millis() - recordStartTime) / 1000;
+      const recRemaining = Math.max(0, recordDuration - recElapsed);
+      push(); fill(255, 0, 0); noStroke(); ellipse(30, 30, 18, 18);
+      fill(255); textAlign(LEFT, CENTER); textSize(16);
+      text(recRemaining.toFixed(1) + 's', 46, 30); pop();
+      if (recRemaining <= 0) stopRecording();
+    }
+    return;
+  }
 
   // Clear the buffer each frame
   handsBuffer.clear();
