@@ -2346,7 +2346,7 @@ function exportAnimatedSVG() {
 
     style += `@keyframes a-${safeFid}{`;
     let firstD = null;
-    for (let s = 0; s <= numSamples; s++) {
+    for (let s = 0; s < numSamples; s++) {
       const loopT = s / numSamples;
       const pct = Math.round(loopT * 100);
       const pair = resolveKeyframePair(loopT);
@@ -2360,6 +2360,8 @@ function exportAnimatedSVG() {
       if (!firstD) firstD = d;
       style += `${pct}%{d:path("${d}")}`;
     }
+    // 100% = same as 0% for seamless loop
+    if (firstD) style += `100%{d:path("${firstD}")}`;
     style += '}';
     if (firstD) {
       // Each finger gets an id so it can be referenced by clipPath
