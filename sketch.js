@@ -99,6 +99,10 @@ let animCustomBezier = [0.42, 0, 0.58, 1]; // cubic-bezier control points [x1, y
 const ANIM_PATH_POINTS = 48;
 let animSvgW = 0; // 0 = auto-crop to hand bounding box
 let animSvgH = 0;
+let animSvgShowRect = false; // show the SVG bounding rect on canvas
+let animSvgRect = null; // {x, y, w, h} in screen space, null = compute from auto
+let animSvgDragging = null; // 'move' | 'resize' | null
+let animSvgDragOff = { x: 0, y: 0 };
 
 /** Apply the selected easing curve to a 0-1 value. */
 function applyAnimEasing(t) {
@@ -208,6 +212,60 @@ function bgImageHitTest(mx, my) {
       return { index: i, action: 'drag' };
     }
   }
+  return null;
+}
+
+/** Compute the auto SVG rect from hand bounding boxes (mirrored to screen). */
+function getAutoSvgRect() {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let maxRW = 50;
+  // Check live hand bounding boxes
+  for (const bb of handBoundingBoxes) {
+    if (!bb) continue;
+    minX = Math.min(minX, bb.x); minY = Math.min(minY, bb.y);
+    maxX = Math.max(maxX, bb.x + bb.w); maxY = Math.max(maxY, bb.y + bb.h);
+  }
+  if (minX >= Infinity) {
+    // Fallback: center of screen
+    return { x: width / 2 - 150, y: height / 2 - 150, w: 300, h: 300 };
+  }
+  const pad = maxRW * 1.5;
+  // Mirror X for screen display
+  return {
+    x: width - maxX - pad,
+    y: minY - pad,
+    w: maxX - minX + pad * 2,
+    h: maxY - minY + pad * 2
+  };
+}
+
+function drawSvgRect() {
+  const r = animSvgRect || getAutoSvgRect();
+  push();
+  noFill();
+  stroke(255, 0, 100); strokeWeight(2);
+  drawingContext.setLineDash([8, 4]);
+  rect(r.x, r.y, r.w, r.h);
+  drawingContext.setLineDash([]);
+  // Resize handle at bottom-right
+  fill(255, 0, 100);
+  noStroke();
+  ellipse(r.x + r.w, r.y + r.h, 12, 12);
+  // Label
+  fill(255, 0, 100);
+  noStroke();
+  textAlign(LEFT, BOTTOM);
+  textSize(11);
+  text(`${Math.round(r.w)} × ${Math.round(r.h)}`, r.x + 4, r.y - 3);
+  pop();
+}
+
+function svgRectHitTest(mx, my) {
+  const r = animSvgRect || getAutoSvgRect();
+  // Resize handle
+  if (dist(mx, my, r.x + r.w, r.y + r.h) < 15) return 'resize';
+  // Move (anywhere inside)
+  if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) return 'move';
   return null;
 }
 
@@ -2483,19 +2541,22 @@ function exportAnimatedSVG() {
     }
   }
 
-  // Compute viewBox — custom size or auto-crop to hand bounding box
+  // Compute viewBox — use dragged rect, custom W/H, or auto-crop
   let vbX, vbY, vbW, vbH;
-  if (animSvgW > 0 && animSvgH > 0) {
-    // Custom size, centered on the hand
-    const pad = bbPad * 1.5;
-    const handCX = width - (bbMinX + bbMaxX) / 2; // mirrored center
+  if (animSvgRect) {
+    // Use the manually positioned/resized rect
+    vbX = Math.round(animSvgRect.x);
+    vbY = Math.round(animSvgRect.y);
+    vbW = Math.round(animSvgRect.w);
+    vbH = Math.round(animSvgRect.h);
+  } else if (animSvgW > 0 && animSvgH > 0) {
+    const handCX = width - (bbMinX + bbMaxX) / 2;
     const handCY = (bbMinY + bbMaxY) / 2;
     vbX = Math.round(handCX - animSvgW / 2);
     vbY = Math.round(handCY - animSvgH / 2);
     vbW = animSvgW;
     vbH = animSvgH;
   } else {
-    // Auto-crop to hand bounding box
     const pad = bbPad * 1.5;
     vbX = Math.max(0, Math.floor(width - bbMaxX - pad));
     vbY = Math.max(0, Math.floor(bbMinY - pad));
@@ -3065,8 +3126,12 @@ async function setup() {
               ]
             },
             {
-              type: 'section',
-              label: '0 = auto-crop to hand'
+              type: 'checkbox',
+              id: 'animSvgShowRect',
+              label: 'Show & drag SVG bounds',
+              value: false,
+              toggle: true,
+              onChange: (v) => { animSvgShowRect = v; if (!v) animSvgDragging = null; }
             },
             {
               type: 'section',
@@ -3390,9 +3455,20 @@ async function setup() {
 }
 
 function mousePressed() {
+  // SVG rect interaction (highest priority when visible)
+  if (animSvgShowRect) {
+    const svgHit = svgRectHitTest(mouseX, mouseY);
+    if (svgHit) {
+      animSvgDragging = svgHit;
+      if (!animSvgRect) animSvgRect = getAutoSvgRect(); // promote to manual
+      animSvgDragOff.x = mouseX - animSvgRect.x;
+      animSvgDragOff.y = mouseY - animSvgRect.y;
+      return;
+    }
+  }
   if (fakeHandActive) {
     fakeHandDragging = fakeHandHitTest(mouseX, mouseY);
-    if (fakeHandDragging >= 0) return; // fake hand takes priority
+    if (fakeHandDragging >= 0) return;
   }
   // Background image interaction
   const hit = bgImageHitTest(mouseX, mouseY);
@@ -3416,9 +3492,30 @@ function mouseReleased() {
   fakeHandDragging = -1;
   bgDragging = -1;
   bgResizing = -1;
+  if (animSvgDragging) {
+    // Sync W/H inputs with the dragged rect
+    if (animSvgRect && cp) {
+      cp.set('animSvgW', Math.round(animSvgRect.w));
+      cp.set('animSvgH', Math.round(animSvgRect.h));
+      animSvgW = Math.round(animSvgRect.w);
+      animSvgH = Math.round(animSvgRect.h);
+    }
+    animSvgDragging = null;
+  }
 }
 
 function mouseDragged() {
+  // SVG rect dragging
+  if (animSvgDragging && animSvgRect) {
+    if (animSvgDragging === 'move') {
+      animSvgRect.x = mouseX - animSvgDragOff.x;
+      animSvgRect.y = mouseY - animSvgDragOff.y;
+    } else if (animSvgDragging === 'resize') {
+      animSvgRect.w = Math.max(50, mouseX - animSvgRect.x);
+      animSvgRect.h = Math.max(50, mouseY - animSvgRect.y);
+    }
+    return;
+  }
   if (bgDragging >= 0 && bgImages[bgDragging]) {
     bgImages[bgDragging].x = mouseX - bgDragOffX;
     bgImages[bgDragging].y = mouseY - bgDragOffY;
@@ -3725,6 +3822,9 @@ function draw() {
       }
     }
   }
+
+  // SVG bounding rect overlay
+  if (animSvgShowRect) drawSvgRect();
 
   // Animation preview overlay
   if (animPreview && animKeyframes.length > 0) {
