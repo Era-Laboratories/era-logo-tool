@@ -3178,11 +3178,16 @@ async function setup() {
     });
     document.getElementById('fake-hand-mirror').addEventListener('change', (e) => {
       fakeHandMirrored = e.target.checked;
-      // Reset to defaults and flip if left hand
+      // Reset to defaults, flip if left hand, then re-center
       initFakeHand();
       if (fakeHandMirrored) {
-        // Flip in ML space (center = 320)
         for (const ft of fakeFingerTips) ft.x = 640 - ft.x;
+        // Re-center around ML midpoint (320)
+        let cx = 0;
+        for (const ft of fakeFingerTips) cx += ft.x;
+        cx /= fakeFingerTips.length;
+        const shift = 320 - cx;
+        for (const ft of fakeFingerTips) ft.x += shift;
       }
     });
 
