@@ -2362,14 +2362,38 @@ function exportAnimatedSVG() {
     }
     style += '}';
     if (firstD) {
-      paths += `<path fill="${firstColor}" d="${firstD}" style="animation:a-${safeFid} ${dur}s ease-in-out infinite"/>`;
+      // Each finger gets an id so it can be referenced by clipPath
+      paths += `<path id="f-${safeFid}" fill="${firstColor}" d="${firstD}" style="animation:a-${safeFid} ${dur}s ease-in-out infinite"/>`;
+    }
+  }
+
+  // Generate overlap layers using SVG clipPath for each finger pair
+  let defs = '';
+  let overlapPaths = '';
+  for (let j = 0; j < commonFingers.length; j++) {
+    for (let k = j + 1; k < commonFingers.length; k++) {
+      const [hiA, fnA] = commonFingers[j].split(':');
+      const [hiB, fnB] = commonFingers[k].split(':');
+      const colorA = animKeyframes[0].hands[hiA][fnA].color;
+      const colorB = animKeyframes[0].hands[hiB][fnB].color;
+      const overlapColor = getIntersectionColor(colorA, colorB);
+      if (!overlapColor || overlapColor === '#000000') continue;
+
+      const safeA = commonFingers[j].replace(/:/g, '-');
+      const safeB = commonFingers[k].replace(/:/g, '-');
+      // clipPath uses finger A's animated shape as the clipping region
+      defs += `<clipPath id="clip-${safeA}"><use href="#f-${safeA}"/></clipPath>`;
+      // Draw finger B's shape clipped to finger A, filled with brand overlap color
+      // This produces the exact intersection region with the correct color
+      overlapPaths += `<path fill="${overlapColor}" clip-path="url(#clip-${safeA})" d="${animKeyframes[0].hands[hiB][fnB] ? (function(){ const p = animKeyframes[0].hands[hiB][fnB]; return fingerParamsToSVGPath(p) || ''; })() : ''}" style="animation:a-${safeB} ${dur}s ease-in-out infinite"/>`;
     }
   }
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+<defs>${defs}</defs>
 <style>${style}</style>
 <rect width="100%" height="100%" fill="#fff"/>
-<g transform="scale(-1,1) translate(-${width},0)" style="mix-blend-mode:multiply">${paths}</g>
+<g transform="scale(-1,1) translate(-${width},0)">${paths}${overlapPaths}</g>
 </svg>`;
 
   const blob = new Blob([svg], { type: 'image/svg+xml' });
