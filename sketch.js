@@ -4417,7 +4417,9 @@ function drawHands() {
     }
     
     // Cache per-hand values outside the finger loop
-    const cachedRawScale = getSmoothedRawHandScale(i);
+    // When normalizeHands is on, landmarks are scaled to targetRawScale=100,
+    // so use 100 for consistent sizing (not the raw scale that varies with distance).
+    const cachedRawScale = normalizeHands ? 100 : getSmoothedRawHandScale(i);
     const cachedScaleMultiplier = cachedRawScale / 100;
     const cachedShapeScale = bigHands ? BIG_HANDS_SCALE : 1;
 
