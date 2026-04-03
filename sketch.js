@@ -2382,6 +2382,9 @@ function exportAnimatedSVG() {
   const dur = animTotalDuration;
   let style = '';
   let paths = '';
+  // Track bounding box across ALL samples and ALL fingers
+  let bbMinX = Infinity, bbMinY = Infinity, bbMaxX = -Infinity, bbMaxY = -Infinity;
+  let bbPad = 0; // max rectWidth for padding
 
   for (const fid of commonFingers) {
     const [hi, fn] = fid.split(':');
@@ -2399,6 +2402,12 @@ function exportAnimatedSVG() {
       const fB = pair.kfB.hands[hi] && pair.kfB.hands[hi][fn];
       if (!fA) continue;
       const p = fB ? lerpFingerParams(fA, fB, pair.segT) : fA;
+      // Track bounding box from finger positions
+      bbMinX = Math.min(bbMinX, p.tipX, p.baseX);
+      bbMinY = Math.min(bbMinY, p.tipY, p.baseY);
+      bbMaxX = Math.max(bbMaxX, p.tipX, p.baseX);
+      bbMaxY = Math.max(bbMaxY, p.tipY, p.baseY);
+      if (p.rectWidth > bbPad) bbPad = p.rectWidth;
       const d = fingerParamsToSVGPath(p);
       if (!d) continue;
       if (!firstD) firstD = d;
@@ -2472,10 +2481,18 @@ function exportAnimatedSVG() {
     }
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+  // Crop viewBox to the bounding box of all finger positions across all samples
+  const pad = bbPad * 1.5;
+  // Positions are in buffer space; display mirrors with scale(-1,1) translate(-width,0)
+  // So buffer X maps to screen X = width - bufferX
+  const vbX = Math.max(0, Math.floor(width - bbMaxX - pad));
+  const vbY = Math.max(0, Math.floor(bbMinY - pad));
+  const vbW = Math.min(width, Math.ceil(bbMaxX - bbMinX + pad * 2));
+  const vbH = Math.min(height, Math.ceil(bbMaxY - bbMinY + pad * 2));
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="${vbW}" height="${vbH}">
 <defs>${defs}</defs>
 <style>${style}</style>
-<rect width="100%" height="100%" fill="#fff"/>
 <g transform="scale(-1,1) translate(-${width},0)">${paths}${textureContent}${overlapPaths}</g>
 </svg>`;
 
