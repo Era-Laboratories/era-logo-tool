@@ -115,6 +115,67 @@ function initFakeHand() {
   ];
 }
 
+// Background collage — draggable/resizable image layers
+let bgImages = []; // [{img, x, y, w, h, id}, ...]
+let bgDragging = -1; // index of image being dragged
+let bgResizing = -1; // index of image being resized
+let bgDragOffX = 0, bgDragOffY = 0;
+let bgResizeStartW = 0, bgResizeStartH = 0, bgResizeStartMX = 0;
+
+function addBgImage(file) {
+  const url = URL.createObjectURL(file);
+  loadImage(url, (img) => {
+    // Scale to fit ~40% of canvas width
+    const targetW = width * 0.4;
+    const scale = targetW / img.width;
+    bgImages.push({
+      img, x: width / 2, y: height / 2,
+      w: img.width * scale, h: img.height * scale,
+      id: Date.now()
+    });
+    URL.revokeObjectURL(url);
+  });
+}
+
+function drawBgImages() {
+  for (const bi of bgImages) {
+    imageMode(CENTER);
+    image(bi.img, bi.x, bi.y, bi.w, bi.h);
+    // Draw resize handle (bottom-right corner)
+    const hx = bi.x + bi.w / 2, hy = bi.y + bi.h / 2;
+    noFill(); stroke(0, 0, 0, 60); strokeWeight(1.5);
+    rect(bi.x - bi.w / 2, bi.y - bi.h / 2, bi.w, bi.h);
+    fill(255); stroke(0, 0, 0, 80); strokeWeight(1);
+    ellipse(hx, hy, 12, 12);
+    // Draw delete button (top-right corner)
+    const dx = bi.x + bi.w / 2 - 8, dy = bi.y - bi.h / 2 + 8;
+    fill(255, 60, 60); noStroke();
+    ellipse(dx, dy, 16, 16);
+    fill(255); textAlign(CENTER, CENTER); textSize(10);
+    text('×', dx, dy - 1);
+  }
+  imageMode(CORNER);
+}
+
+function bgImageHitTest(mx, my) {
+  // Check from top (last added) to bottom
+  for (let i = bgImages.length - 1; i >= 0; i--) {
+    const bi = bgImages[i];
+    // Delete button
+    const dx = bi.x + bi.w / 2 - 8, dy = bi.y - bi.h / 2 + 8;
+    if (dist(mx, my, dx, dy) < 10) return { index: i, action: 'delete' };
+    // Resize handle (bottom-right)
+    const hx = bi.x + bi.w / 2, hy = bi.y + bi.h / 2;
+    if (dist(mx, my, hx, hy) < 15) return { index: i, action: 'resize' };
+    // Drag (anywhere on image)
+    if (mx > bi.x - bi.w / 2 && mx < bi.x + bi.w / 2 &&
+        my > bi.y - bi.h / 2 && my < bi.y + bi.h / 2) {
+      return { index: i, action: 'drag' };
+    }
+  }
+  return null;
+}
+
 function toggleFakeHand() {
   fakeHandActive = !fakeHandActive;
   const btn = document.getElementById('fake-hand-btn');
@@ -2647,6 +2708,27 @@ async function setup() {
               onChange: (file) => {
                 if (file) handleBackgroundMediaFile(file);
               }
+            },
+            {
+              type: 'section',
+              label: 'Collage'
+            },
+            {
+              type: 'file',
+              id: 'bgCollageUpload',
+              accept: 'image/*',
+              buttonLabel: 'Add image layer',
+              onChange: (file) => {
+                if (file) addBgImage(file);
+              }
+            },
+            {
+              type: 'button',
+              id: 'bgCollageClear',
+              label: 'Clear all layers',
+              variant: 'secondary',
+              block: true,
+              onClick: () => { bgImages = []; }
             }
           ]
         },
@@ -3111,11 +3193,45 @@ async function setup() {
 function mousePressed() {
   if (fakeHandActive) {
     fakeHandDragging = fakeHandHitTest(mouseX, mouseY);
+    if (fakeHandDragging >= 0) return; // fake hand takes priority
+  }
+  // Background image interaction
+  const hit = bgImageHitTest(mouseX, mouseY);
+  if (hit) {
+    if (hit.action === 'delete') {
+      bgImages.splice(hit.index, 1);
+    } else if (hit.action === 'drag') {
+      bgDragging = hit.index;
+      bgDragOffX = mouseX - bgImages[hit.index].x;
+      bgDragOffY = mouseY - bgImages[hit.index].y;
+    } else if (hit.action === 'resize') {
+      bgResizing = hit.index;
+      bgResizeStartW = bgImages[hit.index].w;
+      bgResizeStartH = bgImages[hit.index].h;
+      bgResizeStartMX = mouseX;
+    }
   }
 }
 
 function mouseReleased() {
   fakeHandDragging = -1;
+  bgDragging = -1;
+  bgResizing = -1;
+}
+
+function mouseDragged() {
+  if (bgDragging >= 0 && bgImages[bgDragging]) {
+    bgImages[bgDragging].x = mouseX - bgDragOffX;
+    bgImages[bgDragging].y = mouseY - bgDragOffY;
+  }
+  if (bgResizing >= 0 && bgImages[bgResizing]) {
+    const bi = bgImages[bgResizing];
+    const scaleDelta = (mouseX - bgResizeStartMX) / bgResizeStartW;
+    const newW = Math.max(30, bgResizeStartW * (1 + scaleDelta));
+    const aspect = bgResizeStartH / bgResizeStartW;
+    bi.w = newW;
+    bi.h = newW * aspect;
+  }
 }
 
 function windowResized() {
@@ -3145,6 +3261,7 @@ function windowResized() {
 
 function draw() {
   drawBackgroundLayer();
+  if (bgImages.length > 0) drawBgImages();
 	const _m0 = getHandFillMode(0), _m1 = getHandFillMode(1);
 	const _isPaletteMode = (c) => c === 'brand' || c === 'standardized' || (typeof c === 'string' && c.startsWith('#') && !c.startsWith('texture:'));
 	// Use MULTIPLY when fills are palette colors (overlap colors are meaningful)
