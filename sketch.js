@@ -2249,74 +2249,59 @@ function updateAnimPlayhead(loopT) {
 }
 
 /** Build a Paper.js shape from finger params and return normalized SVG path data.
- *  Handles all three shape states to match the live pipeline. */
+ *  ALWAYS uses a rounded rectangle to ensure consistent polygon topology
+ *  across all shape states — prevents flash when CSS interpolates between them. */
 function fingerParamsToSVGPath(p) {
-  let paperPath = null;
   const rbc = p.rectBezOrCircle;
   const dx = p.tipX - p.baseX, dy = p.tipY - p.baseY;
   const len = Math.sqrt(dx * dx + dy * dy);
   const ang = len > 0.001 ? Math.atan2(dy, dx) : 0;
+  const fullDiam = p.rectWidth * 1.28;
+  const fullR = fullDiam / 2;
+
+  // All states produce a rounded rectangle with varying dimensions.
+  // This ensures consistent 48-point polygon topology for CSS interpolation.
+  let rectW, rectH, br, cx, cy;
 
   if (rbc >= 0.5) {
-    // Circle/square with rotation (matches exportPaperCircleToP5)
-    const fullDiam = p.rectWidth * 1.28;
-    const fullR = fullDiam / 2;
+    // Circle/square
     const tp = (rbc - 0.5) * 2;
-    const br = (fullR / 2) + (fullR / 2) * tp;
     const edge = p.rectWidth + (fullDiam - p.rectWidth) * tp;
+    br = (fullR / 2) + (fullR / 2) * tp;
+    rectW = edge; rectH = edge;
     const segLen = Math.min(p.rectWidth, len);
     const dirX = len > 0.001 ? dx / len : 0, dirY = len > 0.001 ? dy / len : 0;
     const segMidX = p.tipX - (segLen / 2) * dirX, segMidY = p.tipY - (segLen / 2) * dirY;
-    const cx = segMidX + (p.tipX - segMidX) * tp;
-    const cy = segMidY + (p.tipY - segMidY) * tp;
-    paperPath = new paper.Path.Rectangle(
-      new paper.Rectangle(cx - edge / 2, cy - edge / 2, edge, edge),
-      new paper.Size(br, br)
-    );
-    paperPath.rotate(ang * 180 / Math.PI, new paper.Point(cx, cy));
+    cx = segMidX + (p.tipX - segMidX) * tp;
+    cy = segMidY + (p.tipY - segMidY) * tp;
   } else if (rbc >= 0.3) {
-    // Transition rectangle (matches exportTransitionRectangleToP5)
-    if (len < 0.001) return null;
+    // Transition rectangle
     const tp = (rbc - 0.3) / 0.2;
     const startLen = len * 0.7;
     const visLen = startLen - (startLen - p.rectWidth) * tp;
-    const fullR = (p.rectWidth * 1.28) / 2;
-    const br = Math.max(0, (fullR / 2) * tp);
-    const dirX = dx / len, dirY = dy / len;
+    br = Math.max(0, (fullR / 2) * tp);
+    rectW = visLen; rectH = p.rectWidth;
+    const dirX = len > 0.001 ? dx / len : 0, dirY = len > 0.001 ? dy / len : 0;
     const sx = p.tipX - visLen * dirX, sy = p.tipY - visLen * dirY;
-    const cx = (sx + p.tipX) / 2, cy = (sy + p.tipY) / 2;
-    paperPath = new paper.Path.Rectangle(
-      new paper.Rectangle(cx - visLen / 2, cy - p.rectWidth / 2, visLen, p.rectWidth),
-      new paper.Size(br, br)
-    );
-    paperPath.rotate(ang * 180 / Math.PI, new paper.Point(cx, cy));
+    cx = (sx + p.tipX) / 2; cy = (sy + p.tipY) / 2;
   } else {
-    // Bezier with rotated control points + partial undrawing
-    const { cp1X, cp1Y, cp2X, cp2Y } = computeAnimControlPoints(p);
-    let visPortion = rbc > 0 ? 1.0 - (rbc / 0.3) * 0.3 : 1.0;
-    // Create the bezier path
-    const bezPath = new paper.Path();
-    bezPath.add(new paper.Segment(new paper.Point(p.baseX, p.baseY), null, new paper.Point(cp1X - p.baseX, cp1Y - p.baseY)));
-    bezPath.add(new paper.Segment(new paper.Point(p.tipX, p.tipY), new paper.Point(cp2X - p.tipX, cp2Y - p.tipY), null));
-    // If partially visible, trim from tip backward
-    if (visPortion < 0.999 && bezPath.length > 0) {
-      const targetLen = Math.max(p.rectWidth, bezPath.length * visPortion);
-      const startOffset = bezPath.length - targetLen;
-      const trimmed = bezPath.clone();
-      try {
-        const split = trimmed.splitAt(startOffset);
-        if (split) { bezPath.remove(); paperPath = split; }
-        else { trimmed.remove(); }
-      } catch (e) { trimmed.remove(); }
-    }
-    if (!paperPath) paperPath = bezPath;
-    paperPath.strokeWidth = p.rectWidth;
-    paperPath.strokeCap = 'square';
-    const outline = bezierPathToOutline(paperPath, p.rectWidth);
-    if (outline) { paperPath.remove(); paperPath = outline; }
+    // Bezier state — approximate as a rounded rectangle
+    // Length = finger length (or partial), width = rectWidth
+    let visLen = len;
+    if (rbc > 0) visLen = Math.max(p.rectWidth, len * (1.0 - (rbc / 0.3) * 0.3));
+    br = 0;
+    rectW = visLen; rectH = p.rectWidth;
+    const dirX = len > 0.001 ? dx / len : 0, dirY = len > 0.001 ? dy / len : 0;
+    const sx = p.tipX - visLen * dirX, sy = p.tipY - visLen * dirY;
+    cx = (sx + p.tipX) / 2; cy = (sy + p.tipY) / 2;
   }
 
-  if (!paperPath) return null;
+  if (rectW < 1 || rectH < 1) return null;
+  const paperPath = new paper.Path.Rectangle(
+    new paper.Rectangle(cx - rectW / 2, cy - rectH / 2, rectW, rectH),
+    new paper.Size(Math.min(br, rectW / 2, rectH / 2), Math.min(br, rectW / 2, rectH / 2))
+  );
+  paperPath.rotate(ang * 180 / Math.PI, new paper.Point(cx, cy));
   const d = normalizePathForAnimation(paperPath);
   paperPath.remove();
   return d;
