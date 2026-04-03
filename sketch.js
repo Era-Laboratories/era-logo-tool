@@ -97,6 +97,8 @@ let animPreviewStart = 0;
 let animEasingType = 'smooth-step'; // 'linear' | 'ease-in' | 'ease-out' | 'smooth-step' | 'ease-in-out-cubic' | 'custom'
 let animCustomBezier = [0.42, 0, 0.58, 1]; // cubic-bezier control points [x1, y1, x2, y2]
 const ANIM_PATH_POINTS = 48;
+let animSvgW = 0; // 0 = auto-crop to hand bounding box
+let animSvgH = 0;
 
 /** Apply the selected easing curve to a 0-1 value. */
 function applyAnimEasing(t) {
@@ -2481,14 +2483,25 @@ function exportAnimatedSVG() {
     }
   }
 
-  // Crop viewBox to the bounding box of all finger positions across all samples
-  const pad = bbPad * 1.5;
-  // Positions are in buffer space; display mirrors with scale(-1,1) translate(-width,0)
-  // So buffer X maps to screen X = width - bufferX
-  const vbX = Math.max(0, Math.floor(width - bbMaxX - pad));
-  const vbY = Math.max(0, Math.floor(bbMinY - pad));
-  const vbW = Math.min(width, Math.ceil(bbMaxX - bbMinX + pad * 2));
-  const vbH = Math.min(height, Math.ceil(bbMaxY - bbMinY + pad * 2));
+  // Compute viewBox — custom size or auto-crop to hand bounding box
+  let vbX, vbY, vbW, vbH;
+  if (animSvgW > 0 && animSvgH > 0) {
+    // Custom size, centered on the hand
+    const pad = bbPad * 1.5;
+    const handCX = width - (bbMinX + bbMaxX) / 2; // mirrored center
+    const handCY = (bbMinY + bbMaxY) / 2;
+    vbX = Math.round(handCX - animSvgW / 2);
+    vbY = Math.round(handCY - animSvgH / 2);
+    vbW = animSvgW;
+    vbH = animSvgH;
+  } else {
+    // Auto-crop to hand bounding box
+    const pad = bbPad * 1.5;
+    vbX = Math.max(0, Math.floor(width - bbMaxX - pad));
+    vbY = Math.max(0, Math.floor(bbMinY - pad));
+    vbW = Math.min(width, Math.ceil(bbMaxX - bbMinX + pad * 2));
+    vbH = Math.min(height, Math.ceil(bbMaxY - bbMinY + pad * 2));
+  }
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="${vbW}" height="${vbH}">
 <defs>${defs}</defs>
@@ -3018,6 +3031,42 @@ async function setup() {
                 { value: 'ease-in-out-cubic', label: 'Ease In-Out Cubic' }
               ],
               onChange: (v) => { animEasingType = v; }
+            },
+            {
+              type: 'section',
+              label: 'SVG Size'
+            },
+            {
+              type: 'group',
+              className: 'cotton-cp-number-inline',
+              controls: [
+                {
+                  type: 'number',
+                  id: 'animSvgW',
+                  label: 'W',
+                  min: 0,
+                  max: 4000,
+                  step: 1,
+                  value: 0,
+                  inline: true,
+                  onChange: (v) => { animSvgW = v; }
+                },
+                {
+                  type: 'number',
+                  id: 'animSvgH',
+                  label: 'H',
+                  min: 0,
+                  max: 4000,
+                  step: 1,
+                  value: 0,
+                  inline: true,
+                  onChange: (v) => { animSvgH = v; }
+                }
+              ]
+            },
+            {
+              type: 'section',
+              label: '0 = auto-crop to hand'
             },
             {
               type: 'section',
