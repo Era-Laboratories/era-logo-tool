@@ -117,10 +117,9 @@ function cleanupFakeHand() {
   hands = [];
   handFrameBuffer = [];
   isDetecting = false;
-  delete calibrationState[0];
-  delete handClosenessState[0];
-  lastDetectedHands = [];
-  skippedFramesCount = 0;
+  // Keep calibrationState and handClosenessState — they have valid
+  // scale data that prevents the normalization scale explosion.
+  // Only the shape/position state needs clearing.
 }
 
 function toggleFakeHand() {
