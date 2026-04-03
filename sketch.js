@@ -2563,7 +2563,13 @@ async function setup() {
                   handBoundingBoxes = [];
                   hands = [];
                   handFrameBuffer = [];
-                  isDetecting = false; // unstick detection if it was mid-flight
+                  isDetecting = false;
+                  // Reset calibration + closeness so real hand recalibrates fresh
+                  // (prevents scale explosion from decayed smoothedRawScale)
+                  delete calibrationState[0];
+                  delete handClosenessState[0];
+                  lastDetectedHands = [];
+                  skippedFramesCount = 0;
                 }
               }
             },
