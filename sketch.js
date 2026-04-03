@@ -129,31 +129,31 @@ function toggleFakeHand() {
  *  Finger joints are very close to tips → circles. */
 function buildFakeLandmarks() {
   if (!fakeFingerTips) return null;
-  // Compute palm center from tips
+  // To get circles, fingerRelativeLength = dist(tip, MCP) / rawScale must be < ~0.5.
+  // With tips spread ~150px from MCPs, we need rawScale > 300.
+  // rawScale = avg(palmWidth, palmLength, wristToIndex, wristToPinky).
+  // So we spread palm landmarks far apart to inflate rawScale.
+  //
+  // Strategy: place MCPs near the tips themselves (each MCP near its own tip).
+  // This makes tip-to-MCP distances short (~10px) → fingerRelativeLength near 0.
+  // rawScale is large because the MCPs mirror the tip spread.
+  const landmarks = [];
+  // Wrist: below the average tip position
   let pcx = 0, pcy = 0;
   for (const ft of fakeFingerTips) { pcx += ft.x; pcy += ft.y; }
   pcx /= 5; pcy /= 5;
-  // Wrist below palm center
-  const wrist = [pcx, pcy + 80];
-  // MCPs in a compact cluster around palm center (determines rawScale)
-  const mcpOffsets = [
-    [30, 20],   // thumb CMC
-    [20, -10],  // index MCP
-    [5, -15],   // middle MCP
-    [-10, -10], // ring MCP
-    [-25, 5]    // pinky MCP
-  ];
-  const landmarks = [];
-  landmarks[0] = [wrist[0], wrist[1], 0];
-  const startIndices = [1, 5, 9, 13, 17]; // first landmark index per finger
+  landmarks[0] = [pcx, pcy + 60, 0]; // wrist
+  const startIndices = [1, 5, 9, 13, 17];
   for (let f = 0; f < 5; f++) {
     const tx = fakeFingerTips[f].x, ty = fakeFingerTips[f].y;
-    const mx = pcx + mcpOffsets[f][0], my = pcy + mcpOffsets[f][1];
     const si = startIndices[f];
-    landmarks[si]     = [mx, my, 0];                                       // MCP
-    landmarks[si + 1] = [tx + (mx - tx) * 0.3, ty + (my - ty) * 0.3, 0];  // PIP (close to tip)
-    landmarks[si + 2] = [tx + (mx - tx) * 0.15, ty + (my - ty) * 0.15, 0]; // DIP (closer)
-    landmarks[si + 3] = [tx, ty, 0];                                        // TIP
+    // MCP: 10px from tip toward center → very short finger → circle
+    const dx = pcx - tx, dy = pcy - ty;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    landmarks[si]     = [tx + dx / len * 10, ty + dy / len * 10, 0]; // MCP
+    landmarks[si + 1] = [tx + dx / len * 6,  ty + dy / len * 6,  0]; // PIP
+    landmarks[si + 2] = [tx + dx / len * 3,  ty + dy / len * 3,  0]; // DIP
+    landmarks[si + 3] = [tx, ty, 0]; // TIP
   }
   return [{ landmarks, handInViewConfidence: 1.0 }];
 }
@@ -369,10 +369,23 @@ function buildMultiplyLookup() {
 function fixOverlapColors(buf) {
   if (!MULTIPLY_TO_BRAND) buildMultiplyLookup();
   if (MULTIPLY_TO_BRAND.length === 0) return;
+  // Only scan within the combined hand bounding box (not full canvas)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const bb of handBoundingBoxes) {
+    if (!bb) continue;
+    minX = Math.min(minX, bb.x); minY = Math.min(minY, bb.y);
+    maxX = Math.max(maxX, bb.x + bb.w); maxY = Math.max(maxY, bb.y + bb.h);
+  }
+  if (minX >= Infinity) return;
   const ctx = buf.drawingContext;
-  const cvs = ctx.canvas;
-  const w = cvs.width, h = cvs.height;
-  const imgData = ctx.getImageData(0, 0, w, h);
+  const pd = pixelDensity();
+  // Clamp to canvas and scale for pixel density
+  const rx = Math.max(0, Math.floor(minX * pd));
+  const ry = Math.max(0, Math.floor(minY * pd));
+  const rw = Math.min(Math.ceil((maxX - minX) * pd), ctx.canvas.width - rx);
+  const rh = Math.min(Math.ceil((maxY - minY) * pd), ctx.canvas.height - ry);
+  if (rw <= 0 || rh <= 0) return;
+  const imgData = ctx.getImageData(rx, ry, rw, rh);
   const d = imgData.data;
   const tol = OVERLAP_TOLERANCE;
   const lookups = MULTIPLY_TO_BRAND;
@@ -390,7 +403,7 @@ function fixOverlapColors(buf) {
       }
     }
   }
-  if (changed) ctx.putImageData(imgData, 0, 0);
+  if (changed) ctx.putImageData(imgData, rx, ry);
 }
 
 // Helper function to get intersection color from two source colors
