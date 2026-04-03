@@ -3128,12 +3128,26 @@ async function setup() {
     fakeHandWrap.className = 'cotton-cp-fake-hand-controls';
     fakeHandWrap.innerHTML = `
       <button id="fake-hand-btn" type="button" class="cotton-cp-button cotton-cp-button--secondary cotton-cp-button--block" style="margin-bottom:6px">Toggle Fake Hand</button>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--cp-fg)">
-        <input type="checkbox" id="fake-hand-mirror" style="width:14px;height:14px;cursor:pointer"> Left hand
-      </label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--cp-fg);flex:1">
+          <input type="checkbox" id="fake-hand-mirror" style="width:14px;height:14px;cursor:pointer"> Left hand
+        </label>
+        <button id="fake-hand-copy" type="button" class="cotton-cp-button cotton-cp-button--secondary" style="font-size:11px;padding:4px 8px">Copy Positions</button>
+      </div>
     `;
     stackBody.insertBefore(fakeHandWrap, tabBar.nextSibling);
     document.getElementById('fake-hand-btn').addEventListener('click', toggleFakeHand);
+    document.getElementById('fake-hand-copy').addEventListener('click', () => {
+      if (!fakeFingerTips) return;
+      const names = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+      const json = JSON.stringify(fakeFingerTips.map((ft, i) => ({ finger: names[i], x: Math.round(ft.x), y: Math.round(ft.y) })), null, 2);
+      navigator.clipboard.writeText(json).then(() => {
+        const btn = document.getElementById('fake-hand-copy');
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy Positions', 1500);
+      });
+      console.log('Fake hand positions (ML space):', json);
+    });
     document.getElementById('fake-hand-mirror').addEventListener('change', (e) => {
       fakeHandMirrored = e.target.checked;
       if (fakeFingerTips) {
