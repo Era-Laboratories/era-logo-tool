@@ -119,10 +119,9 @@ function toggleFakeHand() {
   fakeHandActive = !fakeHandActive;
   const btn = document.getElementById('fake-hand-btn');
   if (btn) btn.textContent = fakeHandActive ? 'Stop Fake Hand' : 'Toggle Fake Hand';
-  // Both on and off: clear ALL pipeline state for a clean start.
-  // On activate: prevents stale real-hand beziers conflicting with fake circle data.
-  // On deactivate: prevents fake hand's inflated calibration/closeness values
-  // from making the real hand appear as circles.
+  // Clear shape/position state for a clean start in either direction.
+  // closeness state is also cleared to prevent inflated smoothedRawScale
+  // from fake hand contaminating real hand (or vice versa).
   for (let hi in paperShapes) {
     for (let fn in paperShapes[hi]) {
       if (paperShapes[hi][fn].shape) paperShapes[hi][fn].shape.remove();
@@ -133,7 +132,6 @@ function toggleFakeHand() {
   lerpedPositions = {};
   lerpedBasePositions = {};
   lerpedPipPositions = {};
-  calibrationState = {};
   handClosenessState = {};
   hands = [];
   handFrameBuffer = [];
@@ -1039,66 +1037,17 @@ function calibrateHandScale(landmarks, handIndex) {
  */
 function computeHandScale(landmarks, handIndex) {
   if (!landmarks || landmarks.length < 21) return 0;
-  
-  // Always use hand 0's calibration data for all hands
-  const calibrationState = getCalibrationState(0);
-  
-  // If not calibrated, use original method
-  if (!calibrationState.isCalibrated) {
-    const wrist = landmarks[HAND_CLOSENESS.WRIST];
-    const indexMCP = landmarks[HAND_CLOSENESS.INDEX_MCP];
-    const middleMCP = landmarks[HAND_CLOSENESS.MIDDLE_MCP];
-    const pinkyMCP = landmarks[HAND_CLOSENESS.PINKY_MCP];
-    
-    const palmWidth = dist2D(indexMCP, pinkyMCP);
-    const palmLength = dist2D(wrist, middleMCP);
-    const wristToIndex = dist2D(wrist, indexMCP);
-    const wristToPinky = dist2D(wrist, pinkyMCP);
-    
-    return (palmWidth + palmLength + wristToIndex + wristToPinky) / 4;
-  }
-  
-  // Collect current palm distances
-  const currentDistances = collectPalmDistances(landmarks);
-  const cleanDistances = calibrationState.cleanDistances;
-  
-  // Calculate relative values for each distance
-  const relativeValues = [];
-  
-  for (const key in currentDistances) {
-    const currentValue = currentDistances[key];
-    const cleanValue = cleanDistances[key];
-    
-    if (cleanValue && cleanValue > 0) {
-      const relativeValue = currentValue / cleanValue;
-      relativeValues.push(relativeValue);
-    }
-  }
-  
-  // If we don't have enough relative values, fall back to original method
-  if (relativeValues.length < 3) {
-    const wrist = landmarks[HAND_CLOSENESS.WRIST];
-    const indexMCP = landmarks[HAND_CLOSENESS.INDEX_MCP];
-    const middleMCP = landmarks[HAND_CLOSENESS.MIDDLE_MCP];
-    const pinkyMCP = landmarks[HAND_CLOSENESS.PINKY_MCP];
-    
-    const palmWidth = dist2D(indexMCP, pinkyMCP);
-    const palmLength = dist2D(wrist, middleMCP);
-    const wristToIndex = dist2D(wrist, indexMCP);
-    const wristToPinky = dist2D(wrist, pinkyMCP);
-    
-    return (palmWidth + palmLength + wristToIndex + wristToPinky) / 4;
-  }
-  
-  // Sort relative values and take the 3 largest
-  relativeValues.sort((a, b) => b - a);
-  const topThree = relativeValues.slice(0, 3);
-  
-  // Calculate average of top 3
-  const avgRelative = topThree.reduce((sum, val) => sum + val, 0) / topThree.length;
-  
-  // Multiply clean raw scale by average relative value (using hand 0's calibration)
-  return calibrationState.cleanRawScale * avgRelative;
+  // Simple direct measurement — no calibration baseline needed.
+  // Average of palm distances gives a stable hand size estimate.
+  const wrist = landmarks[HAND_CLOSENESS.WRIST];
+  const indexMCP = landmarks[HAND_CLOSENESS.INDEX_MCP];
+  const middleMCP = landmarks[HAND_CLOSENESS.MIDDLE_MCP];
+  const pinkyMCP = landmarks[HAND_CLOSENESS.PINKY_MCP];
+  const palmWidth = dist2D(indexMCP, pinkyMCP);
+  const palmLength = dist2D(wrist, middleMCP);
+  const wristToIndex = dist2D(wrist, indexMCP);
+  const wristToPinky = dist2D(wrist, pinkyMCP);
+  return (palmWidth + palmLength + wristToIndex + wristToPinky) / 4;
 }
 
 /**
@@ -3742,31 +3691,10 @@ function drawFramerate() {
 
 function updateCalibrationOverlay() {
   const root = document.getElementById('calibration-overlay');
-  const progressEl = document.getElementById('calibration-progress');
   if (!root) return;
-
-  const hand0State = getCalibrationState(0);
-  if (hand0State.isCalibrated) {
-    root.hidden = true;
-    root.setAttribute('aria-hidden', 'true');
-    return;
-  }
-
-  root.hidden = false;
-  root.setAttribute('aria-hidden', 'false');
-
-  if (progressEl) {
-    if (hand0State.isCalibrating) {
-      const bufferSize = hand0State.stabilityBuffer.length;
-      const targetSize = hand0State.stabilityBufferSize;
-      const progress = Math.min(100, (bufferSize / targetSize) * 100);
-      progressEl.textContent = Math.round(progress) + '%';
-      progressEl.classList.add('calibration-overlay__progress--active');
-    } else {
-      progressEl.textContent = '';
-      progressEl.classList.remove('calibration-overlay__progress--active');
-    }
-  }
+  // No calibration step — always hide
+  root.hidden = true;
+  root.setAttribute('aria-hidden', 'true');
 }
 
 // Helper function to export Paper.js circle to p5
@@ -4413,28 +4341,7 @@ function drawHands() {
   // Get buffered hands (delayed by handBufferFrames)
   let bufferedHands = getBufferedHands();
 
-  // Auto-calibrate on first hand detection (skip stability check)
-  const hand0State = getCalibrationState(0);
-  if (bufferedHands.length > 0 && !hand0State.isCalibrated) {
-    // Immediately calibrate using first available frame
-    const landmarks = bufferedHands[0].landmarks;
-    if (landmarks && landmarks.length >= 21) {
-      hand0State.cleanDistances = collectPalmDistances(landmarks);
-      const wrist = landmarks[HAND_CLOSENESS.WRIST];
-      const indexMCP = landmarks[HAND_CLOSENESS.INDEX_MCP];
-      const middleMCP = landmarks[HAND_CLOSENESS.MIDDLE_MCP];
-      const pinkyMCP = landmarks[HAND_CLOSENESS.PINKY_MCP];
-      const palmWidth = dist2D(indexMCP, pinkyMCP);
-      const palmLength = dist2D(wrist, middleMCP);
-      const wristToIndex = dist2D(wrist, indexMCP);
-      const wristToPinky = dist2D(wrist, pinkyMCP);
-      hand0State.cleanRawScale = (palmWidth + palmLength + wristToIndex + wristToPinky) / 4;
-      hand0State.isCalibrated = true;
-      hand0State.isCalibrating = false;
-    }
-  }
-
-  // Normalize AFTER calibration so calibration sees raw stable landmarks
+  // Normalize hand positions
   const normalizeResult = calculateNormalizeOffset(bufferedHands, layout);
   const normalizeOffsetX = normalizeResult.offsetX;
   const normalizeOffsetY = normalizeResult.offsetY;
