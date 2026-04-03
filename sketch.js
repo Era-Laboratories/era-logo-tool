@@ -4197,7 +4197,7 @@ function shapeToPath(shape, strokeWidth, lowRes) {
 
 // Helper function to calculate normalization offset (layout from getHandTrackingLayout)
 function calculateNormalizeOffset(bufferedHands, layout) {
-  if (!normalizeHands || bufferedHands.length === 0 || fakeHandActive) {
+  if (!normalizeHands || bufferedHands.length === 0) {
     return { offsetX: 0, offsetY: 0, hands: bufferedHands };
   }
   
