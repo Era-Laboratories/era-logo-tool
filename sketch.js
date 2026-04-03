@@ -3525,26 +3525,44 @@ function draw() {
   image(handsBuffer, 0, 0);
   pop();
 
-  // Draw palm center debug dot
+  // Draw palm center debug dots
   if (showPalmCenter) {
-    const bufferedHands = getBufferedHands();
-    for (let i = 0; i < bufferedHands.length; i++) {
-      const lm = bufferedHands[i].landmarks;
+    const layout = getHandTrackingLayout();
+    const rawHands = getBufferedHands();
+    // Also get the normalized hands for comparison
+    const normResult = calculateNormalizeOffset(rawHands, layout);
+    const normHands = normResult.hands;
+
+    for (let i = 0; i < rawHands.length; i++) {
+      const lm = rawHands[i].landmarks;
       if (!lm || lm.length < 21) continue;
-      const layout = getHandTrackingLayout();
-      // Palm center = midpoint of wrist (0) and middle MCP (9)
-      const wx = lm[0][0], wy = lm[0][1];
-      const mx = lm[9][0], my = lm[9][1];
-      const pcMLx = (wx + mx) / 2, pcMLy = (wy + my) / 2;
-      // Convert to canvas (mirrored display)
-      const pcScreenX = width - (layout.ox + pcMLx * layout.sx);
-      const pcScreenY = layout.oy + pcMLy * layout.sy;
+
+      // Raw palm center (red "R")
+      const rwx = lm[0][0], rwy = lm[0][1];
+      const rmx = lm[9][0], rmy = lm[9][1];
+      const rpcX = width - (layout.ox + ((rwx + rmx) / 2) * layout.sx);
+      const rpcY = layout.oy + ((rwy + rmy) / 2) * layout.sy;
       push();
       fill(255, 0, 0); noStroke();
-      ellipse(pcScreenX, pcScreenY, 12, 12);
+      ellipse(rpcX, rpcY, 12, 12);
       fill(255); textAlign(CENTER, CENTER); textSize(9);
-      text('P', pcScreenX, pcScreenY);
+      text('R', rpcX, rpcY);
       pop();
+
+      // Normalized palm center (blue "N")
+      if (normHands[i]) {
+        const nlm = normHands[i].landmarks;
+        const nwx = nlm[0][0], nwy = nlm[0][1];
+        const nmx = nlm[9][0], nmy = nlm[9][1];
+        const npcX = width - (layout.ox + ((nwx + nmx) / 2) * layout.sx);
+        const npcY = layout.oy + ((nwy + nmy) / 2) * layout.sy;
+        push();
+        fill(0, 100, 255); noStroke();
+        ellipse(npcX, npcY, 12, 12);
+        fill(255); textAlign(CENTER, CENTER); textSize(9);
+        text('N', npcX, npcY);
+        pop();
+      }
     }
   }
 
