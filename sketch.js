@@ -20,6 +20,7 @@ let fingerColors = {}; // Store assigned colors for each hand's fingers
 let debugMode = false; // Global debug mode (toggled with 'd' key)
 let debugHandDetection = false; // Debug mode for hand detection (checkbox)
 let showRawHandData = false; // Show raw hand data points
+let showPalmCenter = false; // Show palm center debug dot
 let showIntersections = true; // Show intersection/overlap zones with brand overlap colors
 let enableDrawHands = true; // Enable drawing hands (default true to maintain current behavior)
 let normalizeHands = true; // Normalize hand positions to center of canvas
@@ -3188,6 +3189,9 @@ async function setup() {
         </label>
         <button id="fake-hand-copy" type="button" class="cotton-cp-button cotton-cp-button--secondary" style="font-size:11px;padding:4px 8px">Copy Positions</button>
       </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--cp-fg);margin-top:4px">
+        <input type="checkbox" id="show-palm-center" style="width:14px;height:14px;cursor:pointer"> Show palm center
+      </label>
     `;
     stackBody.insertBefore(fakeHandWrap, tabBar.nextSibling);
     document.getElementById('fake-hand-btn').addEventListener('click', toggleFakeHand);
@@ -3215,6 +3219,9 @@ async function setup() {
         const shift = 320 - cx;
         for (const ft of fakeFingerTips) ft.x += shift;
       }
+    });
+    document.getElementById('show-palm-center').addEventListener('change', (e) => {
+      showPalmCenter = e.target.checked;
     });
 
     // Build the draggable timeline inside the Animation tab
@@ -3517,6 +3524,29 @@ function draw() {
   scale(-1, 1);
   image(handsBuffer, 0, 0);
   pop();
+
+  // Draw palm center debug dot
+  if (showPalmCenter) {
+    const bufferedHands = getBufferedHands();
+    for (let i = 0; i < bufferedHands.length; i++) {
+      const lm = bufferedHands[i].landmarks;
+      if (!lm || lm.length < 21) continue;
+      const layout = getHandTrackingLayout();
+      // Palm center = midpoint of wrist (0) and middle MCP (9)
+      const wx = lm[0][0], wy = lm[0][1];
+      const mx = lm[9][0], my = lm[9][1];
+      const pcMLx = (wx + mx) / 2, pcMLy = (wy + my) / 2;
+      // Convert to canvas (mirrored display)
+      const pcScreenX = width - (layout.ox + pcMLx * layout.sx);
+      const pcScreenY = layout.oy + pcMLy * layout.sy;
+      push();
+      fill(255, 0, 0); noStroke();
+      ellipse(pcScreenX, pcScreenY, 12, 12);
+      fill(255); textAlign(CENTER, CENTER); textSize(9);
+      text('P', pcScreenX, pcScreenY);
+      pop();
+    }
+  }
 
   // Animation preview overlay
   if (animPreview && animKeyframes.length > 0) {
