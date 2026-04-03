@@ -111,7 +111,7 @@ function initFakeHand() {
     { x: 387, y: 206 },  // index
     { x: 355, y: 195 },  // middle
     { x: 327, y: 212 },  // ring
-    { x: 303, y: 250 }   // pinky
+    { x: 312, y: 246 }   // pinky
   ];
 }
 
