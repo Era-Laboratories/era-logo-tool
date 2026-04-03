@@ -95,134 +95,89 @@ let animPreview = false; // when true, plays back keyframes instead of live hand
 let animPreviewStart = 0; // millis() when preview started
 const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 
-// Fake hand mode — draggable fingertips that populate the real pipeline data
+// Fake hand mode — pure overlay, does NOT touch any live pipeline state.
+// Draws circles directly, captures read from fakeFingerTips.
 let fakeHandActive = false;
 let fakeHandDragging = -1;
-let fakeHandMirrored = false; // false = right hand (default), true = left hand
+let fakeHandMirrored = false;
+const FAKE_FINGER_NAMES = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+let fakeFingerTips = null;
 
-function cleanupFakeHand() {
-  for (let fn in paperShapes[0] || {}) {
-    if (paperShapes[0][fn].shape) paperShapes[0][fn].shape.remove();
-    if (paperShapes[0][fn].lastBezierPath) paperShapes[0][fn].lastBezierPath.remove();
-  }
-  delete paperShapes[0];
-  delete lerpedPositions[0];
-  delete lerpedBasePositions[0];
-  delete lerpedPipPositions[0];
-  delete positionVelocities[0];
-  delete basePositionVelocities[0];
-  delete pipPositionVelocities[0];
-  delete fingerColors[0];
-  handBoundingBoxes = [];
-  isDetecting = false;
-  // Keep hands, handFrameBuffer, calibrationState, handClosenessState —
-  // the buffer keeps the last real hand data so getBufferedHands returns
-  // non-empty during the detection gap, preventing smoothedRawScale decay.
+function initFakeHand() {
+  const cx = width / 2, cy = height / 2;
+  fakeFingerTips = [
+    { x: cx + 90, y: cy + 70 },
+    { x: cx + 45, y: cy - 50 },
+    { x: cx,      y: cy - 70 },
+    { x: cx - 45, y: cy - 45 },
+    { x: cx - 85, y: cy + 20 }
+  ];
 }
 
 function toggleFakeHand() {
   fakeHandActive = !fakeHandActive;
   const btn = document.getElementById('fake-hand-btn');
   if (btn) btn.textContent = fakeHandActive ? 'Stop Fake Hand' : 'Toggle Fake Hand';
-  if (fakeHandActive) {
-    if (!fakeFingerTips) initFakeHand();
-  } else {
-    cleanupFakeHand();
-  }
-}
-const FAKE_FINGER_NAMES = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-let fakeFingerTips = null; // [{x, y}, ...] in canvas space (pre-mirror), initialized on first use
-
-function initFakeHand() {
-  // Positions closer together, centered on canvas
-  const cx = width / 2, cy = height / 2;
-  fakeFingerTips = [
-    { x: cx + 90, y: cy + 70 },  // thumb
-    { x: cx + 45, y: cy - 50 },  // index
-    { x: cx,      y: cy - 70 },  // middle
-    { x: cx - 45, y: cy - 45 },  // ring
-    { x: cx - 85, y: cy + 20 }   // pinky
-  ];
+  if (fakeHandActive && !fakeFingerTips) initFakeHand();
+  // No cleanup needed — fake hand never touches pipeline state
 }
 
-/** Populate lerpedPositions, paperShapes, fingerColors etc. from fake fingertip positions
- *  so the normal drawing pipeline and all exports work. */
-function updateFakeHandState() {
-  if (!fakeFingerTips) initFakeHand();
-  const hi = 0;
-  if (!lerpedPositions[hi]) lerpedPositions[hi] = {};
-  if (!lerpedBasePositions[hi]) lerpedBasePositions[hi] = {};
-  if (!lerpedPipPositions[hi]) lerpedPipPositions[hi] = {};
-  if (!paperShapes[hi]) paperShapes[hi] = {};
-  if (!fingerColors[hi]) fingerColors[hi] = {};
-
-  // Match live pipeline size: strokeWeight * scaleMultiplier * mlCanvasScale
-  // In "pin to center" mode, normalization targets rawScale=100 so scaleMultiplier=1.0
+/** Get the rectWidth that matches the live pipeline in pin-to-center mode. */
+function getFakeRectWidth() {
   const sw = cp ? cp.values.strokeWeight : 38;
   const layout = getHandTrackingLayout();
-  const mlCanvasScale = (layout.sx + layout.sy) * 0.5;
-  const rw = sw * 1.0 * mlCanvasScale; // scaleMultiplier=1.0 (normalized)
+  return sw * ((layout.sx + layout.sy) * 0.5);
+}
 
+/** Get the color for a fake finger based on current fill mode. */
+function getFakeFingerColor(fingerName) {
+  const mode = getHandFillMode(0);
+  if (mode === 'standardized') return STANDARDIZED_FINGER_COLORS[fingerName];
+  if (mode === 'brand') return COLOR_PALETTE[FAKE_FINGER_NAMES.indexOf(fingerName) % COLOR_PALETTE.length];
+  if (mode === '__custom__') return handFillCustomColor;
+  if (typeof mode === 'string' && mode.startsWith('#')) return mode;
+  return '#000000';
+}
+
+/** Build fake hand data for captures/exports (reads from fakeFingerTips, not pipeline). */
+function getFakeHandData() {
+  if (!fakeFingerTips) return null;
+  const rw = getFakeRectWidth();
+  const data = {};
   for (let f = 0; f < 5; f++) {
     const fn = FAKE_FINGER_NAMES[f];
     const tip = fakeFingerTips[f];
-    // Base: 2*rw below tip (matches live drawBase computation)
-    const bx = tip.x, by = tip.y + 2 * rw;
-    const px = tip.x, py = tip.y + rw; // PIP midpoint
-    lerpedPositions[hi][fn] = { x: tip.x, y: tip.y };
-    lerpedBasePositions[hi][fn] = { x: bx, y: by };
-    lerpedPipPositions[hi][fn] = { x: px, y: py };
-
-    // Use current fill mode colors (not hardcoded standardized)
-    const basePaletteColor = multicolor ? (fingerColors[hi][fn] || COLOR_PALETTE[f % COLOR_PALETTE.length]) : '#000000';
-    const resolvedColor = resolveFingerFillColor(basePaletteColor, fn, hi);
-    // Assign palette color for future resolves
-    if (!fingerColors[hi][fn]) {
-      assignFingerColors(hi);
-    }
-    const displayColor = resolveFingerFillColor(fingerColors[hi][fn] || basePaletteColor, fn, hi);
-
-    // Create/update Paper.js circle shape
-    const fullR = rw * 0.64;
-    if (!paperShapes[hi][fn]) {
-      paperShapes[hi][fn] = {
-        shape: new paper.Shape.Circle(new paper.Point(tip.x, tip.y), fullR),
-        type: 'circle', color: displayColor,
-        rectWidth: rw, strokeWidth: rw, rectBezOrCircle: 1.0, rectOrBez: 0,
-        fullCircleRadius: fullR, lastBezierPath: null
-      };
-    } else {
-      paperShapes[hi][fn].shape.position = new paper.Point(tip.x, tip.y);
-      paperShapes[hi][fn].color = displayColor;
-      paperShapes[hi][fn].rectBezOrCircle = 1.0;
-      paperShapes[hi][fn].rectWidth = rw;
-      paperShapes[hi][fn].strokeWidth = rw;
-      paperShapes[hi][fn].fullCircleRadius = fullR;
-    }
+    data[fn] = {
+      tipX: tip.x, tipY: tip.y,
+      baseX: tip.x, baseY: tip.y + 2 * rw,
+      pipX: tip.x, pipY: tip.y + rw,
+      rectWidth: rw, rectBezOrCircle: 1.0, rectOrBez: 0,
+      color: getFakeFingerColor(fn)
+    };
   }
-  // Hand bounding box for exports
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  const pad = rw;
-  for (const ft of fakeFingerTips) {
-    minX = Math.min(minX, ft.x - pad); minY = Math.min(minY, ft.y - pad);
-    maxX = Math.max(maxX, ft.x + pad); maxY = Math.max(maxY, ft.y + pad);
-  }
-  handBoundingBoxes[0] = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  return data;
 }
 
-/** Draw draggable fingertip handles on top of the rendered shapes. */
-function drawFakeHandHandles() {
+/** Draw fake hand circles + drag handles directly to canvas (no pipeline). */
+function drawFakeHand() {
   if (!fakeFingerTips) return;
+  const rw = getFakeRectWidth();
+  const fullDiam = rw * 1.28;
   push();
   translate(width, 0);
   scale(-1, 1);
-  for (let i = 0; i < fakeFingerTips.length; i++) {
+  for (let i = 0; i < 5; i++) {
+    const fn = FAKE_FINGER_NAMES[i];
     const ft = fakeFingerTips[i];
-    noFill();
-    stroke(0, 0, 0, 80);
-    strokeWeight(2);
-    ellipse(ft.x, ft.y, 20, 20); // drag handle
-    // crosshair
+    fill(getFakeFingerColor(fn));
+    noStroke();
+    ellipse(ft.x, ft.y, fullDiam, fullDiam);
+  }
+  // Drag handles
+  for (let i = 0; i < 5; i++) {
+    const ft = fakeFingerTips[i];
+    noFill(); stroke(0, 0, 0, 80); strokeWeight(2);
+    ellipse(ft.x, ft.y, 20, 20);
     line(ft.x - 6, ft.y, ft.x + 6, ft.y);
     line(ft.x, ft.y - 6, ft.x, ft.y + 6);
   }
@@ -234,7 +189,7 @@ function fakeHandHitTest(mx, my) {
   const ux = width - mx, uy = my;
   for (let i = 0; i < fakeFingerTips.length; i++) {
     const dx = ux - fakeFingerTips[i].x, dy = uy - fakeFingerTips[i].y;
-    if (dx * dx + dy * dy < 900) return i; // 30px hit radius
+    if (dx * dx + dy * dy < 900) return i;
   }
   return -1;
 }
@@ -1649,6 +1604,32 @@ function saveCroppedPNG() {
  *  For texture/video fills, embeds a rasterized image.
  *  For solid colors, exports vector paths. */
 function exportSVG() {
+  // In fake hand mode, generate SVG from fake finger positions directly
+  if (fakeHandActive && fakeFingerTips) {
+    const rw = getFakeRectWidth();
+    const fullR = rw * 0.64;
+    let circles = '';
+    for (let i = 0; i < 5; i++) {
+      const ft = fakeFingerTips[i];
+      const col = getFakeFingerColor(FAKE_FINGER_NAMES[i]);
+      circles += `<circle cx="${width - ft.x}" cy="${ft.y}" r="${fullR}" fill="${col}"/>`;
+    }
+    // Compute bounding box
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const ft of fakeFingerTips) {
+      const sx = width - ft.x; // mirrored
+      minX = Math.min(minX, sx - fullR); minY = Math.min(minY, ft.y - fullR);
+      maxX = Math.max(maxX, sx + fullR); maxY = Math.max(maxY, ft.y + fullR);
+    }
+    const vb = `${Math.floor(minX)} ${Math.floor(minY)} ${Math.ceil(maxX - minX)} ${Math.ceil(maxY - minY)}`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${Math.ceil(maxX - minX)}" height="${Math.ceil(maxY - minY)}">${circles}</svg>`;
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'hand-tracking.svg'; a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
   const bb = getAllHandsBounds();
   const mirroredBB = bb ? { x: width - bb.x - bb.w, y: bb.y, w: bb.w, h: bb.h } : { x: 0, y: 0, w: width, h: height };
   const anyTexture = handNeedsTexture(0) || handNeedsTexture(1);
@@ -1825,6 +1806,17 @@ function computeRotatedControlPoints(drawBaseX, drawBaseY, drawTipX, drawTipY, p
 /** Capture the current hand shapes as an animation keyframe.
  *  Stores the adjusted draw positions + shape params. */
 function captureKeyframe() {
+  // In fake hand mode, build keyframe directly from fake data
+  if (fakeHandActive) {
+    const fakeData = getFakeHandData();
+    if (!fakeData) return null;
+    const kf = { id: Date.now(), t: 0, hands: { 0: fakeData } };
+    animKeyframes.push(kf);
+    redistributeKeyframeTimes();
+    updateKeyframeCountLabel();
+    renderAnimTimeline();
+    return kf;
+  }
   const kf = { id: Date.now(), t: 0, hands: {} };
   let hasData = false;
   for (let i in paperShapes) {
@@ -2381,6 +2373,41 @@ function exportAnimatedSVG() {
  *  Positions are stored relative to the hand centroid for portability. */
 function captureWidgetPose(name) {
   if (!name) return;
+  // In fake hand mode, build pose directly from fake data
+  if (fakeHandActive) {
+    const fakeData = getFakeHandData();
+    if (!fakeData) return;
+    const pose = { fingers: { 0: {} } };
+    let cx = 0, cy = 0, count = 0;
+    for (const fn of FAKE_FINGER_NAMES) {
+      cx += fakeData[fn].tipX; cy += fakeData[fn].tipY;
+      cx += fakeData[fn].baseX; cy += fakeData[fn].baseY;
+      count += 2;
+    }
+    cx /= count; cy /= count;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let maxRW = 0;
+    for (const fn of FAKE_FINGER_NAMES) {
+      const d = fakeData[fn];
+      const f = {
+        tipX: d.tipX - cx, tipY: d.tipY - cy,
+        baseX: d.baseX - cx, baseY: d.baseY - cy,
+        pipX: d.pipX - cx, pipY: d.pipY - cy,
+        rectWidth: d.rectWidth, rectBezOrCircle: d.rectBezOrCircle,
+        rectOrBez: d.rectOrBez, color: d.color
+      };
+      pose.fingers[0][fn] = f;
+      minX = Math.min(minX, f.tipX, f.baseX);
+      minY = Math.min(minY, f.tipY, f.baseY);
+      maxX = Math.max(maxX, f.tipX, f.baseX);
+      maxY = Math.max(maxY, f.tipY, f.baseY);
+      if (d.rectWidth > maxRW) maxRW = d.rectWidth;
+    }
+    pose.refSize = Math.max(maxX - minX, maxY - minY) + maxRW * 3;
+    widgetPoses[name] = pose;
+    updatePoseList();
+    return;
+  }
   const pose = { fingers: {} };
   let cx = 0, cy = 0, count = 0;
   // First pass: collect raw data and compute centroid
@@ -3291,38 +3318,13 @@ function draw() {
   const tex0 = getTextureForHand(0), tex1 = getTextureForHand(1);
   const needsSplitBuffers = handFillSplitHands && (tex0 || tex1);
 
-  // Fake hand mode: populate pipeline state from draggable tips, then draw normally
+  // Fake hand mode: draw directly, no pipeline state touched
   if (fakeHandActive) {
-    // Handle drag
     if (fakeHandDragging >= 0 && mouseIsPressed && fakeFingerTips) {
       fakeFingerTips[fakeHandDragging].x = width - mouseX;
       fakeFingerTips[fakeHandDragging].y = mouseY;
     }
-    // Update pipeline state from fake positions
-    updateFakeHandState();
-    // Draw shapes to handsBuffer using actual pipeline sizes
-    handsBuffer.clear();
-    handsBuffer.blendMode(_useMultiply ? MULTIPLY : BLEND);
-    for (const fn of FAKE_FINGER_NAMES) {
-      const sd = paperShapes[0] && paperShapes[0][fn];
-      if (!sd || !sd.shape) continue;
-      const c = color(sd.color);
-      const fullDiam = sd.rectWidth * 1.28;
-      const pos = sd.shape.position;
-      handsBuffer.fill(red(c), green(c), blue(c));
-      handsBuffer.noStroke();
-      handsBuffer.ellipse(pos.x, pos.y, fullDiam, fullDiam);
-    }
-    // Overlap color fix
-    if (showIntersections && _useMultiply) {
-      fixOverlapColors(handsBuffer);
-    }
-    // Display mirrored
-    push(); translate(width, 0); scale(-1, 1);
-    image(handsBuffer, 0, 0);
-    pop();
-    // Draw drag handles on top
-    drawFakeHandHandles();
+    drawFakeHand();
   }
 
   if (!fakeHandActive) {
