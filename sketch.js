@@ -98,17 +98,53 @@ const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 // Fake hand mode — draggable fingertips that populate the real pipeline data
 let fakeHandActive = false;
 let fakeHandDragging = -1;
+let fakeHandMirrored = false; // false = right hand (default), true = left hand
+
+function cleanupFakeHand() {
+  for (let fn in paperShapes[0] || {}) {
+    if (paperShapes[0][fn].shape) paperShapes[0][fn].shape.remove();
+    if (paperShapes[0][fn].lastBezierPath) paperShapes[0][fn].lastBezierPath.remove();
+  }
+  delete paperShapes[0];
+  delete lerpedPositions[0];
+  delete lerpedBasePositions[0];
+  delete lerpedPipPositions[0];
+  delete positionVelocities[0];
+  delete basePositionVelocities[0];
+  delete pipPositionVelocities[0];
+  delete fingerColors[0];
+  handBoundingBoxes = [];
+  hands = [];
+  handFrameBuffer = [];
+  isDetecting = false;
+  delete calibrationState[0];
+  delete handClosenessState[0];
+  lastDetectedHands = [];
+  skippedFramesCount = 0;
+}
+
+function toggleFakeHand() {
+  fakeHandActive = !fakeHandActive;
+  const btn = document.getElementById('fake-hand-btn');
+  if (btn) btn.textContent = fakeHandActive ? 'Stop Fake Hand' : 'Toggle Fake Hand';
+  if (fakeHandActive) {
+    if (!fakeFingerTips) initFakeHand();
+  } else {
+    cleanupFakeHand();
+  }
+}
 const FAKE_FINGER_NAMES = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 let fakeFingerTips = null; // [{x, y}, ...] in canvas space (pre-mirror), initialized on first use
 
 function initFakeHand() {
-  const cw = width, ch = height;
+  // Positions closer together, centered on canvas
+  const cx = width / 2, cy = height / 2;
   fakeFingerTips = [
-    { x: cw * 0.65, y: ch * 0.65 }, // thumb
-    { x: cw * 0.55, y: ch * 0.30 }, // index
-    { x: cw * 0.42, y: ch * 0.18 }, // middle
-    { x: cw * 0.28, y: ch * 0.28 }, // ring
-    { x: cw * 0.15, y: ch * 0.55 }  // pinky
+    { x: cx + 90, y: cy + 70 },  // thumb
+    { x: cx + 45, y: cy - 50 },  // index
+    { x: cx,      y: cy - 70 },  // middle
+    { x: cx - 45, y: cy - 45 },  // ring
+    { x: cx - 85, y: cy + 20 }   // pinky
   ];
 }
 
@@ -2535,45 +2571,6 @@ async function setup() {
           plain: true,
           controls: [
             {
-              type: 'button',
-              id: 'fake-hand-btn',
-              label: 'Fake Hand',
-              variant: 'secondary',
-              block: true,
-              onClick: () => {
-                fakeHandActive = !fakeHandActive;
-                const btn = document.getElementById('fake-hand-btn');
-                if (btn) btn.textContent = fakeHandActive ? 'Stop Fake Hand' : 'Fake Hand';
-                if (fakeHandActive) {
-                  if (!fakeFingerTips) initFakeHand();
-                } else {
-                  // Clean up ALL fake hand state so live pipeline starts fresh
-                  for (let fn in paperShapes[0] || {}) {
-                    if (paperShapes[0][fn].shape) paperShapes[0][fn].shape.remove();
-                    if (paperShapes[0][fn].lastBezierPath) paperShapes[0][fn].lastBezierPath.remove();
-                  }
-                  delete paperShapes[0];
-                  delete lerpedPositions[0];
-                  delete lerpedBasePositions[0];
-                  delete lerpedPipPositions[0];
-                  delete positionVelocities[0];
-                  delete basePositionVelocities[0];
-                  delete pipPositionVelocities[0];
-                  delete fingerColors[0];
-                  handBoundingBoxes = [];
-                  hands = [];
-                  handFrameBuffer = [];
-                  isDetecting = false;
-                  // Reset calibration + closeness so real hand recalibrates fresh
-                  // (prevents scale explosion from decayed smoothedRawScale)
-                  delete calibrationState[0];
-                  delete handClosenessState[0];
-                  lastDetectedHands = [];
-                  skippedFramesCount = 0;
-                }
-              }
-            },
-            {
               type: 'checkbox',
               id: 'normalizeHands',
               label: 'Pin logo to center',
@@ -3133,6 +3130,26 @@ async function setup() {
       tabBar.appendChild(btn);
     });
     setTab(0);
+
+    // Persistent fake hand controls (visible on all tabs, above tab content)
+    const fakeHandWrap = document.createElement('div');
+    fakeHandWrap.className = 'cotton-cp-fake-hand-controls';
+    fakeHandWrap.innerHTML = `
+      <button id="fake-hand-btn" type="button" class="cotton-cp-button cotton-cp-button--secondary cotton-cp-button--block" style="margin-bottom:6px">Toggle Fake Hand</button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--cp-fg)">
+        <input type="checkbox" id="fake-hand-mirror" style="width:14px;height:14px;cursor:pointer"> Left hand
+      </label>
+    `;
+    stackBody.insertBefore(fakeHandWrap, tabBar.nextSibling);
+    document.getElementById('fake-hand-btn').addEventListener('click', toggleFakeHand);
+    document.getElementById('fake-hand-mirror').addEventListener('change', (e) => {
+      fakeHandMirrored = e.target.checked;
+      if (fakeFingerTips) {
+        // Flip tips horizontally around canvas center
+        const cx = width / 2;
+        for (const ft of fakeFingerTips) ft.x = 2 * cx - ft.x;
+      }
+    });
 
     // Build the draggable timeline inside the Animation tab
     buildAnimTimeline();
