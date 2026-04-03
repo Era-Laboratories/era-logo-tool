@@ -107,11 +107,11 @@ let fakeFingerTips = null;
 function initFakeHand() {
   // Positions in ML space (640x480). Mirrored on display.
   fakeFingerTips = [
-    { x: 420, y: 320 },  // thumb
-    { x: 380, y: 180 },  // index
-    { x: 320, y: 140 },  // middle
-    { x: 260, y: 180 },  // ring
-    { x: 210, y: 260 }   // pinky
+    { x: 413, y: 274 },  // thumb
+    { x: 390, y: 215 },  // index
+    { x: 357, y: 198 },  // middle
+    { x: 328, y: 218 },  // ring
+    { x: 309, y: 252 }   // pinky
   ];
 }
 
