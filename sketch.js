@@ -95,22 +95,23 @@ let animPreview = false; // when true, plays back keyframes instead of live hand
 let animPreviewStart = 0; // millis() when preview started
 const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 
-// Fake hand mode — pure overlay, does NOT touch any live pipeline state.
-// Draws circles directly, captures read from fakeFingerTips.
+// Fake hand mode — substitutes ML detection with draggable fingertip landmarks.
+// Feeds into the SAME pipeline as a real hand. No special overlay, no bypass.
 let fakeHandActive = false;
 let fakeHandDragging = -1;
 let fakeHandMirrored = false;
 const FAKE_FINGER_NAMES = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+// Draggable tip positions in ML input space (640x480)
 let fakeFingerTips = null;
 
 function initFakeHand() {
-  const cx = width / 2, cy = height / 2;
+  // Positions in ML space (640x480). Mirrored on display.
   fakeFingerTips = [
-    { x: cx + 90, y: cy + 70 },
-    { x: cx + 45, y: cy - 50 },
-    { x: cx,      y: cy - 70 },
-    { x: cx - 45, y: cy - 45 },
-    { x: cx - 85, y: cy + 20 }
+    { x: 420, y: 320 },  // thumb
+    { x: 380, y: 180 },  // index
+    { x: 320, y: 140 },  // middle
+    { x: 260, y: 180 },  // ring
+    { x: 210, y: 260 }   // pinky
   ];
 }
 
@@ -119,77 +120,61 @@ function toggleFakeHand() {
   const btn = document.getElementById('fake-hand-btn');
   if (btn) btn.textContent = fakeHandActive ? 'Stop Fake Hand' : 'Toggle Fake Hand';
   if (fakeHandActive && !fakeFingerTips) initFakeHand();
-  // No cleanup needed — fake hand never touches pipeline state
+  // No cleanup — when toggled off, the normal ML detection resumes
+  // and naturally overwrites all pipeline state with real hand data.
 }
 
-/** Get the rectWidth that matches the live pipeline in pin-to-center mode. */
-function getFakeRectWidth() {
-  const sw = cp ? cp.values.strokeWeight : 38;
-  const layout = getHandTrackingLayout();
-  return sw * ((layout.sx + layout.sy) * 0.5);
-}
-
-/** Get the color for a fake finger based on current fill mode. */
-function getFakeFingerColor(fingerName) {
-  const mode = getHandFillMode(0);
-  if (mode === 'standardized') return STANDARDIZED_FINGER_COLORS[fingerName];
-  if (mode === 'brand') return COLOR_PALETTE[FAKE_FINGER_NAMES.indexOf(fingerName) % COLOR_PALETTE.length];
-  if (mode === '__custom__') return handFillCustomColor;
-  if (typeof mode === 'string' && mode.startsWith('#')) return mode;
-  return '#000000';
-}
-
-/** Build fake hand data for captures/exports (reads from fakeFingerTips, not pipeline). */
-function getFakeHandData() {
+/** Build 21 ML-format landmarks from draggable fingertip positions.
+ *  Palm joints form a compact cluster so rawScale is reasonable (~80-100).
+ *  Finger joints are very close to tips → circles. */
+function buildFakeLandmarks() {
   if (!fakeFingerTips) return null;
-  const rw = getFakeRectWidth();
-  const data = {};
+  // Compute palm center from tips
+  let pcx = 0, pcy = 0;
+  for (const ft of fakeFingerTips) { pcx += ft.x; pcy += ft.y; }
+  pcx /= 5; pcy /= 5;
+  // Wrist below palm center
+  const wrist = [pcx, pcy + 80];
+  // MCPs in a compact cluster around palm center (determines rawScale)
+  const mcpOffsets = [
+    [30, 20],   // thumb CMC
+    [20, -10],  // index MCP
+    [5, -15],   // middle MCP
+    [-10, -10], // ring MCP
+    [-25, 5]    // pinky MCP
+  ];
+  const landmarks = [];
+  landmarks[0] = [wrist[0], wrist[1], 0];
+  const startIndices = [1, 5, 9, 13, 17]; // first landmark index per finger
   for (let f = 0; f < 5; f++) {
-    const fn = FAKE_FINGER_NAMES[f];
-    const tip = fakeFingerTips[f];
-    data[fn] = {
-      tipX: tip.x, tipY: tip.y,
-      baseX: tip.x, baseY: tip.y + 2 * rw,
-      pipX: tip.x, pipY: tip.y + rw,
-      rectWidth: rw, rectBezOrCircle: 1.0, rectOrBez: 0,
-      color: getFakeFingerColor(fn)
-    };
+    const tx = fakeFingerTips[f].x, ty = fakeFingerTips[f].y;
+    const mx = pcx + mcpOffsets[f][0], my = pcy + mcpOffsets[f][1];
+    const si = startIndices[f];
+    landmarks[si]     = [mx, my, 0];                                       // MCP
+    landmarks[si + 1] = [tx + (mx - tx) * 0.3, ty + (my - ty) * 0.3, 0];  // PIP (close to tip)
+    landmarks[si + 2] = [tx + (mx - tx) * 0.15, ty + (my - ty) * 0.15, 0]; // DIP (closer)
+    landmarks[si + 3] = [tx, ty, 0];                                        // TIP
   }
-  return data;
+  return [{ landmarks, handInViewConfidence: 1.0 }];
 }
 
-/** Draw fake hand circles + drag handles directly to canvas (no pipeline). */
-function drawFakeHand() {
-  if (!fakeFingerTips) return;
-  const rw = getFakeRectWidth();
-  const fullDiam = rw * 1.28;
-  push();
-  translate(width, 0);
-  scale(-1, 1);
-  for (let i = 0; i < 5; i++) {
-    const fn = FAKE_FINGER_NAMES[i];
-    const ft = fakeFingerTips[i];
-    fill(getFakeFingerColor(fn));
-    noStroke();
-    ellipse(ft.x, ft.y, fullDiam, fullDiam);
-  }
-  // Drag handles
-  for (let i = 0; i < 5; i++) {
-    const ft = fakeFingerTips[i];
-    noFill(); stroke(0, 0, 0, 80); strokeWeight(2);
-    ellipse(ft.x, ft.y, 20, 20);
-    line(ft.x - 6, ft.y, ft.x + 6, ft.y);
-    line(ft.x, ft.y - 6, ft.x, ft.y + 6);
-  }
-  pop();
+/** Convert screen mouse position to ML input space for dragging. */
+function screenToML(mx, my) {
+  const layout = getHandTrackingLayout();
+  // Screen is mirrored: screen x = width - (layout.ox + mlX * layout.sx)
+  // So mlX = (width - mx - layout.ox) / layout.sx
+  return {
+    x: (width - mx - layout.ox) / layout.sx,
+    y: (my - layout.oy) / layout.sy
+  };
 }
 
 function fakeHandHitTest(mx, my) {
   if (!fakeFingerTips) return -1;
-  const ux = width - mx, uy = my;
+  const ml = screenToML(mx, my);
   for (let i = 0; i < fakeFingerTips.length; i++) {
-    const dx = ux - fakeFingerTips[i].x, dy = uy - fakeFingerTips[i].y;
-    if (dx * dx + dy * dy < 900) return i;
+    const dx = ml.x - fakeFingerTips[i].x, dy = ml.y - fakeFingerTips[i].y;
+    if (dx * dx + dy * dy < 900) return i; // ~30px hit radius in ML space
   }
   return -1;
 }
@@ -1604,32 +1589,6 @@ function saveCroppedPNG() {
  *  For texture/video fills, embeds a rasterized image.
  *  For solid colors, exports vector paths. */
 function exportSVG() {
-  // In fake hand mode, generate SVG from fake finger positions directly
-  if (fakeHandActive && fakeFingerTips) {
-    const rw = getFakeRectWidth();
-    const fullR = rw * 0.64;
-    let circles = '';
-    for (let i = 0; i < 5; i++) {
-      const ft = fakeFingerTips[i];
-      const col = getFakeFingerColor(FAKE_FINGER_NAMES[i]);
-      circles += `<circle cx="${width - ft.x}" cy="${ft.y}" r="${fullR}" fill="${col}"/>`;
-    }
-    // Compute bounding box
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const ft of fakeFingerTips) {
-      const sx = width - ft.x; // mirrored
-      minX = Math.min(minX, sx - fullR); minY = Math.min(minY, ft.y - fullR);
-      maxX = Math.max(maxX, sx + fullR); maxY = Math.max(maxY, ft.y + fullR);
-    }
-    const vb = `${Math.floor(minX)} ${Math.floor(minY)} ${Math.ceil(maxX - minX)} ${Math.ceil(maxY - minY)}`;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${Math.ceil(maxX - minX)}" height="${Math.ceil(maxY - minY)}">${circles}</svg>`;
-    const blob = new Blob([svg], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'hand-tracking.svg'; a.click();
-    URL.revokeObjectURL(url);
-    return;
-  }
   const bb = getAllHandsBounds();
   const mirroredBB = bb ? { x: width - bb.x - bb.w, y: bb.y, w: bb.w, h: bb.h } : { x: 0, y: 0, w: width, h: height };
   const anyTexture = handNeedsTexture(0) || handNeedsTexture(1);
@@ -1807,16 +1766,6 @@ function computeRotatedControlPoints(drawBaseX, drawBaseY, drawTipX, drawTipY, p
  *  Stores the adjusted draw positions + shape params. */
 function captureKeyframe() {
   // In fake hand mode, build keyframe directly from fake data
-  if (fakeHandActive) {
-    const fakeData = getFakeHandData();
-    if (!fakeData) return null;
-    const kf = { id: Date.now(), t: 0, hands: { 0: fakeData } };
-    animKeyframes.push(kf);
-    redistributeKeyframeTimes();
-    updateKeyframeCountLabel();
-    renderAnimTimeline();
-    return kf;
-  }
   const kf = { id: Date.now(), t: 0, hands: {} };
   let hasData = false;
   for (let i in paperShapes) {
@@ -2373,41 +2322,6 @@ function exportAnimatedSVG() {
  *  Positions are stored relative to the hand centroid for portability. */
 function captureWidgetPose(name) {
   if (!name) return;
-  // In fake hand mode, build pose directly from fake data
-  if (fakeHandActive) {
-    const fakeData = getFakeHandData();
-    if (!fakeData) return;
-    const pose = { fingers: { 0: {} } };
-    let cx = 0, cy = 0, count = 0;
-    for (const fn of FAKE_FINGER_NAMES) {
-      cx += fakeData[fn].tipX; cy += fakeData[fn].tipY;
-      cx += fakeData[fn].baseX; cy += fakeData[fn].baseY;
-      count += 2;
-    }
-    cx /= count; cy /= count;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    let maxRW = 0;
-    for (const fn of FAKE_FINGER_NAMES) {
-      const d = fakeData[fn];
-      const f = {
-        tipX: d.tipX - cx, tipY: d.tipY - cy,
-        baseX: d.baseX - cx, baseY: d.baseY - cy,
-        pipX: d.pipX - cx, pipY: d.pipY - cy,
-        rectWidth: d.rectWidth, rectBezOrCircle: d.rectBezOrCircle,
-        rectOrBez: d.rectOrBez, color: d.color
-      };
-      pose.fingers[0][fn] = f;
-      minX = Math.min(minX, f.tipX, f.baseX);
-      minY = Math.min(minY, f.tipY, f.baseY);
-      maxX = Math.max(maxX, f.tipX, f.baseX);
-      maxY = Math.max(maxY, f.tipY, f.baseY);
-      if (d.rectWidth > maxRW) maxRW = d.rectWidth;
-    }
-    pose.refSize = Math.max(maxX - minX, maxY - minY) + maxRW * 3;
-    widgetPoses[name] = pose;
-    updatePoseList();
-    return;
-  }
   const pose = { fingers: {} };
   let cx = 0, cy = 0, count = 0;
   // First pass: collect raw data and compute centroid
@@ -3224,9 +3138,20 @@ function draw() {
 	const _useMultiply = showIntersections && _isPaletteMode(_m0) && _isPaletteMode(_m1);
 	handsBuffer.blendMode(_useMultiply ? MULTIPLY : BLEND);
   
-  // Manual hand detection with frame skipping (non-blocking)
+  // Hand detection — fake hand substitutes ML with draggable landmarks
   if (fakeHandActive) {
-    // Skip ML detection in fake hand mode
+    // Handle drag
+    if (fakeHandDragging >= 0 && mouseIsPressed && fakeFingerTips) {
+      const ml = screenToML(mouseX, mouseY);
+      fakeFingerTips[fakeHandDragging].x = ml.x;
+      fakeFingerTips[fakeHandDragging].y = ml.y;
+    }
+    // Inject fake landmarks into the normal pipeline (same as ML detection)
+    const fakeHands = buildFakeLandmarks();
+    if (fakeHands) {
+      hands = fakeHands;
+      addToHandBuffer(hands);
+    }
   } else if (detector && video && video.loadedmetadata && !isDetecting) {
       isDetecting = true;
       const vel = video.elt;
@@ -3318,16 +3243,6 @@ function draw() {
   const tex0 = getTextureForHand(0), tex1 = getTextureForHand(1);
   const needsSplitBuffers = handFillSplitHands && (tex0 || tex1);
 
-  // Fake hand mode: draw directly, no pipeline state touched
-  if (fakeHandActive) {
-    if (fakeHandDragging >= 0 && mouseIsPressed && fakeFingerTips) {
-      fakeFingerTips[fakeHandDragging].x = width - mouseX;
-      fakeFingerTips[fakeHandDragging].y = mouseY;
-    }
-    drawFakeHand();
-  }
-
-  if (!fakeHandActive) {
   // Clear the buffer each frame
   handsBuffer.clear();
 
@@ -3463,8 +3378,6 @@ function draw() {
     drawFramerate();
   }
   
-  } // end if (!fakeHandActive)
-
   updateCalibrationOverlay();
 
   // Handle save countdown (for PNG, SVG, or Record)
