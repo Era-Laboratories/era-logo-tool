@@ -215,16 +215,16 @@ function buildFakeLandmarks() {
   // This makes tip-to-MCP distances short (~10px) → fingerRelativeLength near 0.
   // rawScale is large because the MCPs mirror the tip spread.
   const landmarks = [];
-  // Wrist: below the average tip position
   let pcx = 0, pcy = 0;
   for (const ft of fakeFingerTips) { pcx += ft.x; pcy += ft.y; }
   pcx /= 5; pcy /= 5;
-  landmarks[0] = [pcx, pcy + 60, 0]; // wrist
+  // Desired palm center = below the finger centroid
+  const palmCX = pcx, palmCY = pcy + 30;
   const startIndices = [1, 5, 9, 13, 17];
+  // Build finger joints first (MCPs near tips for circles)
   for (let f = 0; f < 5; f++) {
     const tx = fakeFingerTips[f].x, ty = fakeFingerTips[f].y;
     const si = startIndices[f];
-    // MCP: 10px from tip toward center → very short finger → circle
     const dx = pcx - tx, dy = pcy - ty;
     const len = Math.sqrt(dx * dx + dy * dy) || 1;
     landmarks[si]     = [tx + dx / len * 10, ty + dy / len * 10, 0]; // MCP
@@ -232,6 +232,10 @@ function buildFakeLandmarks() {
     landmarks[si + 2] = [tx + dx / len * 3,  ty + dy / len * 3,  0]; // DIP
     landmarks[si + 3] = [tx, ty, 0]; // TIP
   }
+  // Place wrist so midpoint(wrist, middleMCP) = palmCenter
+  // middleMCP = landmarks[9]
+  const midMCP = landmarks[9];
+  landmarks[0] = [2 * palmCX - midMCP[0], 2 * palmCY - midMCP[1], 0];
   return [{ landmarks, handInViewConfidence: 1.0 }];
 }
 
