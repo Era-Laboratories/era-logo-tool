@@ -2370,7 +2370,7 @@ function exportAnimatedSVG() {
     style += '}';
     if (firstD) {
       // Each finger gets an id so it can be referenced by clipPath
-      paths += `<path id="f-${safeFid}" fill="${firstColor}" d="${firstD}" style="animation:a-${safeFid} ${dur}s ease-in-out infinite"/>`;
+      paths += `<path id="f-${safeFid}" fill="${firstColor}" d="${firstD}" style="animation:a-${safeFid} ${dur}s linear infinite"/>`;
     }
   }
 
@@ -2392,7 +2392,7 @@ function exportAnimatedSVG() {
       defs += `<clipPath id="clip-${safeA}"><use href="#f-${safeA}"/></clipPath>`;
       // Draw finger B's shape clipped to finger A, filled with brand overlap color
       // This produces the exact intersection region with the correct color
-      overlapPaths += `<path fill="${overlapColor}" clip-path="url(#clip-${safeA})" d="${animKeyframes[0].hands[hiB][fnB] ? (function(){ const p = animKeyframes[0].hands[hiB][fnB]; return fingerParamsToSVGPath(p) || ''; })() : ''}" style="animation:a-${safeB} ${dur}s ease-in-out infinite"/>`;
+      overlapPaths += `<path fill="${overlapColor}" clip-path="url(#clip-${safeA})" d="${animKeyframes[0].hands[hiB][fnB] ? (function(){ const p = animKeyframes[0].hands[hiB][fnB]; return fingerParamsToSVGPath(p) || ''; })() : ''}" style="animation:a-${safeB} ${dur}s linear infinite"/>`;
     }
   }
 
