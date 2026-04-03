@@ -116,43 +116,63 @@ function initFakeHand() {
  *  so the normal drawing pipeline and all exports work. */
 function updateFakeHandState() {
   if (!fakeFingerTips) initFakeHand();
-  const hi = 0; // hand index
+  const hi = 0;
   if (!lerpedPositions[hi]) lerpedPositions[hi] = {};
   if (!lerpedBasePositions[hi]) lerpedBasePositions[hi] = {};
   if (!lerpedPipPositions[hi]) lerpedPipPositions[hi] = {};
   if (!paperShapes[hi]) paperShapes[hi] = {};
-  // Assign standardized colors
   if (!fingerColors[hi]) fingerColors[hi] = {};
+
+  // Match live pipeline size: strokeWeight * scaleMultiplier * mlCanvasScale
+  // In "pin to center" mode, normalization targets rawScale=100 so scaleMultiplier=1.0
+  const sw = cp ? cp.values.strokeWeight : 38;
+  const layout = getHandTrackingLayout();
+  const mlCanvasScale = (layout.sx + layout.sy) * 0.5;
+  const rw = sw * 1.0 * mlCanvasScale; // scaleMultiplier=1.0 (normalized)
+
   for (let f = 0; f < 5; f++) {
     const fn = FAKE_FINGER_NAMES[f];
     const tip = fakeFingerTips[f];
-    // Base: 30px below tip (toward bottom of screen in canvas space)
-    const bx = tip.x, by = tip.y + 30;
-    const px = tip.x, py = tip.y + 15; // PIP midpoint
+    // Base: 2*rw below tip (matches live drawBase computation)
+    const bx = tip.x, by = tip.y + 2 * rw;
+    const px = tip.x, py = tip.y + rw; // PIP midpoint
     lerpedPositions[hi][fn] = { x: tip.x, y: tip.y };
     lerpedBasePositions[hi][fn] = { x: bx, y: by };
     lerpedPipPositions[hi][fn] = { x: px, y: py };
-    fingerColors[hi][fn] = STANDARDIZED_FINGER_COLORS[fn];
+
+    // Use current fill mode colors (not hardcoded standardized)
+    const basePaletteColor = multicolor ? (fingerColors[hi][fn] || COLOR_PALETTE[f % COLOR_PALETTE.length]) : '#000000';
+    const resolvedColor = resolveFingerFillColor(basePaletteColor, fn, hi);
+    // Assign palette color for future resolves
+    if (!fingerColors[hi][fn]) {
+      assignFingerColors(hi);
+    }
+    const displayColor = resolveFingerFillColor(fingerColors[hi][fn] || basePaletteColor, fn, hi);
+
     // Create/update Paper.js circle shape
-    const rw = 45; // reasonable rectWidth for circles
+    const fullR = rw * 0.64;
     if (!paperShapes[hi][fn]) {
       paperShapes[hi][fn] = {
-        shape: new paper.Shape.Circle(new paper.Point(tip.x, tip.y), rw * 0.64),
-        type: 'circle', color: STANDARDIZED_FINGER_COLORS[fn],
+        shape: new paper.Shape.Circle(new paper.Point(tip.x, tip.y), fullR),
+        type: 'circle', color: displayColor,
         rectWidth: rw, strokeWidth: rw, rectBezOrCircle: 1.0, rectOrBez: 0,
-        fullCircleRadius: rw * 0.64, lastBezierPath: null
+        fullCircleRadius: fullR, lastBezierPath: null
       };
     } else {
       paperShapes[hi][fn].shape.position = new paper.Point(tip.x, tip.y);
-      paperShapes[hi][fn].color = STANDARDIZED_FINGER_COLORS[fn];
+      paperShapes[hi][fn].color = displayColor;
       paperShapes[hi][fn].rectBezOrCircle = 1.0;
+      paperShapes[hi][fn].rectWidth = rw;
+      paperShapes[hi][fn].strokeWidth = rw;
+      paperShapes[hi][fn].fullCircleRadius = fullR;
     }
   }
-  // Set hand bounding box for exports
+  // Hand bounding box for exports
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const pad = rw;
   for (const ft of fakeFingerTips) {
-    minX = Math.min(minX, ft.x - 50); minY = Math.min(minY, ft.y - 50);
-    maxX = Math.max(maxX, ft.x + 50); maxY = Math.max(maxY, ft.y + 50);
+    minX = Math.min(minX, ft.x - pad); minY = Math.min(minY, ft.y - pad);
+    maxX = Math.max(maxX, ft.x + pad); maxY = Math.max(maxY, ft.y + pad);
   }
   handBoundingBoxes[0] = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
@@ -3240,19 +3260,22 @@ function draw() {
     }
     // Update pipeline state from fake positions
     updateFakeHandState();
-    // Draw the shapes using the handsBuffer (same as live pipeline)
+    // Draw shapes to handsBuffer using actual pipeline sizes
     handsBuffer.clear();
+    handsBuffer.blendMode(_useMultiply ? MULTIPLY : BLEND);
     for (const fn of FAKE_FINGER_NAMES) {
       const sd = paperShapes[0] && paperShapes[0][fn];
       if (!sd || !sd.shape) continue;
       const c = color(sd.color);
-      const rbc = sd.rectBezOrCircle;
       const fullDiam = sd.rectWidth * 1.28;
-      const fullR = fullDiam / 2;
       const pos = sd.shape.position;
       handsBuffer.fill(red(c), green(c), blue(c));
       handsBuffer.noStroke();
       handsBuffer.ellipse(pos.x, pos.y, fullDiam, fullDiam);
+    }
+    // Overlap color fix
+    if (showIntersections && _useMultiply) {
+      fixOverlapColors(handsBuffer);
     }
     // Display mirrored
     push(); translate(width, 0); scale(-1, 1);
