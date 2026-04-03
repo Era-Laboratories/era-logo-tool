@@ -2102,6 +2102,26 @@ function drawAnimPreview() {
     }
   }
 
+  // Apply texture fill if active (same as live pipeline's source-atop compositing)
+  const anyTexture = handNeedsTexture(0) || handNeedsTexture(1);
+  if (anyTexture) {
+    const tex = getTextureForHand(0) || getTextureForHand(1);
+    if (tex) {
+      const ctx = animPreviewBuffer.drawingContext;
+      const src = tex.type === 'video' && tex.video
+        ? tex.video : (tex.img && (tex.img.canvas || tex.img.elt || tex.img));
+      const iw = tex.type === 'video' ? tex.video.videoWidth : tex.img.width;
+      const ih = tex.type === 'video' ? tex.video.videoHeight : tex.img.height;
+      if (src && iw > 0 && ih > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-atop';
+        const s = Math.max(width / iw, height / ih);
+        ctx.drawImage(src, (width - iw * s) / 2, (height - ih * s) / 2, iw * s, ih * s);
+        ctx.restore();
+      }
+    }
+  }
+
   // Composite buffer onto main canvas, mirrored
   push();
   translate(width, 0);
@@ -2415,11 +2435,48 @@ function exportAnimatedSVG() {
     }
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+  // Check if texture fill is active — embed texture clipped to finger shapes
+  const anyTexture = handNeedsTexture(0) || handNeedsTexture(1);
+  let textureContent = '';
+  if (anyTexture) {
+    const tex = getTextureForHand(0) || getTextureForHand(1);
+    if (tex) {
+      // Get texture as data URL
+      let dataUrl = '';
+      if (tex.type === 'video' && tex.video) {
+        const c = document.createElement('canvas');
+        c.width = tex.video.videoWidth || 640;
+        c.height = tex.video.videoHeight || 480;
+        c.getContext('2d').drawImage(tex.video, 0, 0, c.width, c.height);
+        dataUrl = c.toDataURL('image/jpeg', 0.85);
+      } else if (tex.img) {
+        const c = document.createElement('canvas');
+        c.width = tex.img.width; c.height = tex.img.height;
+        c.getContext('2d').drawImage(tex.img.canvas || tex.img.elt || tex.img, 0, 0);
+        dataUrl = c.toDataURL('image/jpeg', 0.85);
+      }
+      if (dataUrl) {
+        // Clip the texture image to all finger shapes combined
+        defs += `<clipPath id="clip-all-fingers">`;
+        for (const fid of commonFingers) {
+          const safeFid = fid.replace(/:/g, '-');
+          defs += `<use href="#f-${safeFid}"/>`;
+        }
+        defs += `</clipPath>`;
+        // Replace colored paths with transparent ones + clipped texture
+        // Make finger paths transparent (just for clipping reference)
+        paths = paths.replace(/fill="[^"]+"/g, 'fill="transparent"');
+        textureContent = `<image clip-path="url(#clip-all-fingers)" href="${dataUrl}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
+        overlapPaths = ''; // no color overlaps with textures
+      }
+    }
+  }
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
 <defs>${defs}</defs>
 <style>${style}</style>
 <rect width="100%" height="100%" fill="#fff"/>
-<g transform="scale(-1,1) translate(-${width},0)">${paths}${overlapPaths}</g>
+<g transform="scale(-1,1) translate(-${width},0)">${paths}${textureContent}${overlapPaths}</g>
 </svg>`;
 
   const blob = new Blob([svg], { type: 'image/svg+xml' });
