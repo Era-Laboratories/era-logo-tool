@@ -2544,7 +2544,21 @@ async function setup() {
                 fakeHandActive = !fakeHandActive;
                 const btn = document.getElementById('fake-hand-btn');
                 if (btn) btn.textContent = fakeHandActive ? 'Stop Fake Hand' : 'Fake Hand';
-                if (fakeHandActive && !fakeFingerTips) initFakeHand();
+                if (fakeHandActive) {
+                  if (!fakeFingerTips) initFakeHand();
+                } else {
+                  // Clean up fake hand state so live pipeline doesn't choke on leftover shapes
+                  for (let fn in paperShapes[0] || {}) {
+                    if (paperShapes[0][fn].shape) paperShapes[0][fn].shape.remove();
+                    if (paperShapes[0][fn].lastBezierPath) paperShapes[0][fn].lastBezierPath.remove();
+                  }
+                  delete paperShapes[0];
+                  delete lerpedPositions[0];
+                  delete lerpedBasePositions[0];
+                  delete lerpedPipPositions[0];
+                  delete fingerColors[0];
+                  handBoundingBoxes = [];
+                }
               }
             },
             {
