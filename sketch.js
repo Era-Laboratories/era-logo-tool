@@ -3285,6 +3285,7 @@ function draw() {
     drawFakeHandHandles();
   }
 
+  if (!fakeHandActive) {
   // Clear the buffer each frame
   handsBuffer.clear();
 
@@ -3420,8 +3421,10 @@ function draw() {
     drawFramerate();
   }
   
+  } // end if (!fakeHandActive)
+
   updateCalibrationOverlay();
-  
+
   // Handle save countdown (for PNG, SVG, or Record)
   if (saveCountdown >= 0) {
     const elapsed = (millis() - saveCountdownStartTime) / 1000;
