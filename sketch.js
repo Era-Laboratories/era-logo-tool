@@ -95,51 +95,93 @@ let animPreview = false; // when true, plays back keyframes instead of live hand
 let animPreviewStart = 0; // millis() when preview started
 const ANIM_PATH_POINTS = 48; // number of points for normalized path polygons
 
-// Demo hand mode — directly draws 5 draggable shapes, bypasses ML pipeline entirely
-let demoHandActive = false;
-let demoDragging = -1; // index of shape being dragged, -1 = none
+// Fake hand mode — draggable fingertips that populate the real pipeline data
+let fakeHandActive = false;
+let fakeHandDragging = -1;
+const FAKE_FINGER_NAMES = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+let fakeFingerTips = null; // [{x, y}, ...] in canvas space (pre-mirror), initialized on first use
 
-// 5 demo shapes: position in canvas space, drawn directly (no ML pipeline)
-const DEMO_FINGER_NAMES = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-let demoShapes = null; // initialized on first use
-
-function initDemoShapes() {
-  // Default Era logo dot positions (canvas space, pre-mirror)
-  // These get mirrored when drawn, so left in canvas = right on screen
+function initFakeHand() {
   const cw = width, ch = height;
-  demoShapes = [
-    { x: cw * 0.65, y: ch * 0.65, r: 55, color: STANDARDIZED_FINGER_COLORS.thumb,  name: 'thumb' },
-    { x: cw * 0.55, y: ch * 0.30, r: 55, color: STANDARDIZED_FINGER_COLORS.index,  name: 'index' },
-    { x: cw * 0.42, y: ch * 0.18, r: 60, color: STANDARDIZED_FINGER_COLORS.middle, name: 'middle' },
-    { x: cw * 0.28, y: ch * 0.28, r: 55, color: STANDARDIZED_FINGER_COLORS.ring,   name: 'ring' },
-    { x: cw * 0.15, y: ch * 0.55, r: 50, color: STANDARDIZED_FINGER_COLORS.pinky,  name: 'pinky' }
+  fakeFingerTips = [
+    { x: cw * 0.65, y: ch * 0.65 }, // thumb
+    { x: cw * 0.55, y: ch * 0.30 }, // index
+    { x: cw * 0.42, y: ch * 0.18 }, // middle
+    { x: cw * 0.28, y: ch * 0.28 }, // ring
+    { x: cw * 0.15, y: ch * 0.55 }  // pinky
   ];
 }
 
-/** Draw the demo shapes directly to the main canvas (mirrored). */
-function drawDemoHand() {
-  if (!demoShapes) initDemoShapes();
+/** Populate lerpedPositions, paperShapes, fingerColors etc. from fake fingertip positions
+ *  so the normal drawing pipeline and all exports work. */
+function updateFakeHandState() {
+  if (!fakeFingerTips) initFakeHand();
+  const hi = 0; // hand index
+  if (!lerpedPositions[hi]) lerpedPositions[hi] = {};
+  if (!lerpedBasePositions[hi]) lerpedBasePositions[hi] = {};
+  if (!lerpedPipPositions[hi]) lerpedPipPositions[hi] = {};
+  if (!paperShapes[hi]) paperShapes[hi] = {};
+  // Assign standardized colors
+  if (!fingerColors[hi]) fingerColors[hi] = {};
+  for (let f = 0; f < 5; f++) {
+    const fn = FAKE_FINGER_NAMES[f];
+    const tip = fakeFingerTips[f];
+    // Base: 30px below tip (toward bottom of screen in canvas space)
+    const bx = tip.x, by = tip.y + 30;
+    const px = tip.x, py = tip.y + 15; // PIP midpoint
+    lerpedPositions[hi][fn] = { x: tip.x, y: tip.y };
+    lerpedBasePositions[hi][fn] = { x: bx, y: by };
+    lerpedPipPositions[hi][fn] = { x: px, y: py };
+    fingerColors[hi][fn] = STANDARDIZED_FINGER_COLORS[fn];
+    // Create/update Paper.js circle shape
+    const rw = 45; // reasonable rectWidth for circles
+    if (!paperShapes[hi][fn]) {
+      paperShapes[hi][fn] = {
+        shape: new paper.Shape.Circle(new paper.Point(tip.x, tip.y), rw * 0.64),
+        type: 'circle', color: STANDARDIZED_FINGER_COLORS[fn],
+        rectWidth: rw, strokeWidth: rw, rectBezOrCircle: 1.0, rectOrBez: 0,
+        fullCircleRadius: rw * 0.64, lastBezierPath: null
+      };
+    } else {
+      paperShapes[hi][fn].shape.position = new paper.Point(tip.x, tip.y);
+      paperShapes[hi][fn].color = STANDARDIZED_FINGER_COLORS[fn];
+      paperShapes[hi][fn].rectBezOrCircle = 1.0;
+    }
+  }
+  // Set hand bounding box for exports
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const ft of fakeFingerTips) {
+    minX = Math.min(minX, ft.x - 50); minY = Math.min(minY, ft.y - 50);
+    maxX = Math.max(maxX, ft.x + 50); maxY = Math.max(maxY, ft.y + 50);
+  }
+  handBoundingBoxes[0] = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/** Draw draggable fingertip handles on top of the rendered shapes. */
+function drawFakeHandHandles() {
+  if (!fakeFingerTips) return;
   push();
   translate(width, 0);
   scale(-1, 1);
-  for (const s of demoShapes) {
-    fill(s.color);
-    noStroke();
-    ellipse(s.x, s.y, s.r * 2, s.r * 2);
+  for (let i = 0; i < fakeFingerTips.length; i++) {
+    const ft = fakeFingerTips[i];
+    noFill();
+    stroke(0, 0, 0, 80);
+    strokeWeight(2);
+    ellipse(ft.x, ft.y, 20, 20); // drag handle
+    // crosshair
+    line(ft.x - 6, ft.y, ft.x + 6, ft.y);
+    line(ft.x, ft.y - 6, ft.x, ft.y + 6);
   }
   pop();
 }
 
-/** Check if mouse (in mirrored canvas space) hits a demo shape. Returns index or -1. */
-function demoHitTest(mx, my) {
-  if (!demoShapes) return -1;
-  // Convert screen mouse to unmirrored canvas space
-  const ux = width - mx;
-  const uy = my;
-  for (let i = 0; i < demoShapes.length; i++) {
-    const s = demoShapes[i];
-    const dx = ux - s.x, dy = uy - s.y;
-    if (dx * dx + dy * dy < s.r * s.r) return i;
+function fakeHandHitTest(mx, my) {
+  if (!fakeFingerTips) return -1;
+  const ux = width - mx, uy = my;
+  for (let i = 0; i < fakeFingerTips.length; i++) {
+    const dx = ux - fakeFingerTips[i].x, dy = uy - fakeFingerTips[i].y;
+    if (dx * dx + dy * dy < 900) return i; // 30px hit radius
   }
   return -1;
 }
@@ -2474,15 +2516,15 @@ async function setup() {
           controls: [
             {
               type: 'button',
-              id: 'demo-hand-btn',
-              label: 'Demo Hand',
+              id: 'fake-hand-btn',
+              label: 'Fake Hand',
               variant: 'secondary',
               block: true,
               onClick: () => {
-                demoHandActive = !demoHandActive;
-                const btn = document.getElementById('demo-hand-btn');
-                if (btn) btn.textContent = demoHandActive ? 'Stop Demo' : 'Demo Hand';
-                if (demoHandActive && !demoShapes) initDemoShapes();
+                fakeHandActive = !fakeHandActive;
+                const btn = document.getElementById('fake-hand-btn');
+                if (btn) btn.textContent = fakeHandActive ? 'Stop Fake Hand' : 'Fake Hand';
+                if (fakeHandActive && !fakeFingerTips) initFakeHand();
               }
             },
             {
@@ -3052,13 +3094,13 @@ async function setup() {
 }
 
 function mousePressed() {
-  if (demoHandActive) {
-    demoDragging = demoHitTest(mouseX, mouseY);
+  if (fakeHandActive) {
+    fakeHandDragging = fakeHandHitTest(mouseX, mouseY);
   }
 }
 
 function mouseReleased() {
-  demoDragging = -1;
+  fakeHandDragging = -1;
 }
 
 function windowResized() {
@@ -3095,10 +3137,9 @@ function draw() {
 	const _useMultiply = showIntersections && _isPaletteMode(_m0) && _isPaletteMode(_m1);
 	handsBuffer.blendMode(_useMultiply ? MULTIPLY : BLEND);
   
-  // Demo mode: skip entire ML pipeline, draw shapes directly later
   // Manual hand detection with frame skipping (non-blocking)
-  if (demoHandActive) {
-    // Skip ML detection — demo shapes drawn after background
+  if (fakeHandActive) {
+    // Skip ML detection in fake hand mode
   } else if (detector && video && video.loadedmetadata && !isDetecting) {
       isDetecting = true;
       const vel = video.elt;
@@ -3190,40 +3231,35 @@ function draw() {
   const tex0 = getTextureForHand(0), tex1 = getTextureForHand(1);
   const needsSplitBuffers = handFillSplitHands && (tex0 || tex1);
 
-  // Demo mode: draw shapes directly, skip entire normal pipeline
-  if (demoHandActive) {
-    drawDemoHand();
+  // Fake hand mode: populate pipeline state from draggable tips, then draw normally
+  if (fakeHandActive) {
     // Handle drag
-    if (demoDragging >= 0 && mouseIsPressed && demoShapes) {
-      demoShapes[demoDragging].x = width - mouseX; // unmirror
-      demoShapes[demoDragging].y = mouseY;
+    if (fakeHandDragging >= 0 && mouseIsPressed && fakeFingerTips) {
+      fakeFingerTips[fakeHandDragging].x = width - mouseX;
+      fakeFingerTips[fakeHandDragging].y = mouseY;
     }
-    // Skip to end of draw (after the normal pipeline)
-    updateCalibrationOverlay();
-    if (saveCountdown >= 0) {
-      const elapsed = (millis() - saveCountdownStartTime) / 1000;
-      const remaining = Math.ceil(saveCountdownDelay - elapsed);
-      if (remaining > 0) {
-        push(); fill(0); noStroke(); textAlign(LEFT, BOTTOM); textSize(200);
-        text(remaining.toString(), 20, height - 20); pop();
-        saveCountdown = remaining;
-      } else {
-        saveCountdown = -1;
-        if (savePendingAction === 'png') saveCroppedPNG();
-        else if (savePendingAction === 'svg') exportSVG();
-        else if (savePendingAction === 'record') startRecording();
-        savePendingAction = null;
-      }
+    // Update pipeline state from fake positions
+    updateFakeHandState();
+    // Draw the shapes using the handsBuffer (same as live pipeline)
+    handsBuffer.clear();
+    for (const fn of FAKE_FINGER_NAMES) {
+      const sd = paperShapes[0] && paperShapes[0][fn];
+      if (!sd || !sd.shape) continue;
+      const c = color(sd.color);
+      const rbc = sd.rectBezOrCircle;
+      const fullDiam = sd.rectWidth * 1.28;
+      const fullR = fullDiam / 2;
+      const pos = sd.shape.position;
+      handsBuffer.fill(red(c), green(c), blue(c));
+      handsBuffer.noStroke();
+      handsBuffer.ellipse(pos.x, pos.y, fullDiam, fullDiam);
     }
-    if (isRecording) {
-      const recElapsed = (millis() - recordStartTime) / 1000;
-      const recRemaining = Math.max(0, recordDuration - recElapsed);
-      push(); fill(255, 0, 0); noStroke(); ellipse(30, 30, 18, 18);
-      fill(255); textAlign(LEFT, CENTER); textSize(16);
-      text(recRemaining.toFixed(1) + 's', 46, 30); pop();
-      if (recRemaining <= 0) stopRecording();
-    }
-    return;
+    // Display mirrored
+    push(); translate(width, 0); scale(-1, 1);
+    image(handsBuffer, 0, 0);
+    pop();
+    // Draw drag handles on top
+    drawFakeHandHandles();
   }
 
   // Clear the buffer each frame
