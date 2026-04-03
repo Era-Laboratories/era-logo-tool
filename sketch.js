@@ -4369,8 +4369,8 @@ function drawHands() {
   bufferedHands = normalizeResult.hands;
 
   // Update hand closeness system for each detected hand
-  // Skip in fake hand mode — keep scale frozen so shapes don't resize when dragged
-  if (!fakeHandActive) {
+  // In fake hand mode, only run once to establish initial scale, then freeze
+  if (!fakeHandActive || !handClosenessState[0] || !handClosenessState[0].smoothedRawScale) {
     for (let i = 0; i < bufferedHands.length; i++) {
       updateHandCloseness(bufferedHands[i].landmarks, i);
     }
