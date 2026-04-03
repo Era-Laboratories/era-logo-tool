@@ -3178,10 +3178,11 @@ async function setup() {
     });
     document.getElementById('fake-hand-mirror').addEventListener('change', (e) => {
       fakeHandMirrored = e.target.checked;
-      if (fakeFingerTips) {
-        // Flip tips horizontally around canvas center
-        const cx = width / 2;
-        for (const ft of fakeFingerTips) ft.x = 2 * cx - ft.x;
+      // Reset to defaults and flip if left hand
+      initFakeHand();
+      if (fakeHandMirrored) {
+        // Flip in ML space (center = 320)
+        for (const ft of fakeFingerTips) ft.x = 640 - ft.x;
       }
     });
 
