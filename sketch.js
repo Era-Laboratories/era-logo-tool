@@ -114,12 +114,10 @@ function cleanupFakeHand() {
   delete pipPositionVelocities[0];
   delete fingerColors[0];
   handBoundingBoxes = [];
-  hands = [];
-  handFrameBuffer = [];
   isDetecting = false;
-  // Keep calibrationState and handClosenessState — they have valid
-  // scale data that prevents the normalization scale explosion.
-  // Only the shape/position state needs clearing.
+  // Keep hands, handFrameBuffer, calibrationState, handClosenessState —
+  // the buffer keeps the last real hand data so getBufferedHands returns
+  // non-empty during the detection gap, preventing smoothedRawScale decay.
 }
 
 function toggleFakeHand() {
