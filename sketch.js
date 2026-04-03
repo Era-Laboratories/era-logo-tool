@@ -173,23 +173,32 @@ function buildFakeLandmarks() {
   return [{ landmarks, handInViewConfidence: 1.0 }];
 }
 
-/** Convert screen mouse position to ML input space for dragging. */
+/** Convert screen mouse position to ML input space for dragging.
+ *  The display mirrors horizontally and maps ML→canvas via layout. */
 function screenToML(mx, my) {
   const layout = getHandTrackingLayout();
-  // Screen is mirrored: screen x = width - (layout.ox + mlX * layout.sx)
-  // So mlX = (width - mx - layout.ox) / layout.sx
   return {
     x: (width - mx - layout.ox) / layout.sx,
     y: (my - layout.oy) / layout.sy
   };
 }
 
+/** Convert ML position to screen position (inverse of pipeline transform). */
+function mlToScreen(mlx, mly) {
+  const layout = getHandTrackingLayout();
+  return {
+    x: width - (layout.ox + mlx * layout.sx),
+    y: layout.oy + mly * layout.sy
+  };
+}
+
 function fakeHandHitTest(mx, my) {
   if (!fakeFingerTips) return -1;
-  const ml = screenToML(mx, my);
+  // Hit test in screen space using the displayed positions
   for (let i = 0; i < fakeFingerTips.length; i++) {
-    const dx = ml.x - fakeFingerTips[i].x, dy = ml.y - fakeFingerTips[i].y;
-    if (dx * dx + dy * dy < 900) return i; // ~30px hit radius in ML space
+    const screen = mlToScreen(fakeFingerTips[i].x, fakeFingerTips[i].y);
+    const dx = mx - screen.x, dy = my - screen.y;
+    if (dx * dx + dy * dy < 2500) return i; // 50px hit radius on screen
   }
   return -1;
 }
