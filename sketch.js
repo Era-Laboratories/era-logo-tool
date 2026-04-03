@@ -4367,17 +4367,12 @@ function calculateNormalizeOffset(bufferedHands, layout) {
     const hand = bufferedHands[i];
     const landmarks = hand.landmarks;
     
-    // Calculate average position of all landmarks for this hand (center point)
-    let sumX = 0;
-    let sumY = 0;
-    
-    for (let j = 0; j < landmarks.length; j++) {
-      sumX += landmarks[j][0];
-      sumY += landmarks[j][1];
-    }
-    
-    const avgX = sumX / landmarks.length;
-    const avgY = sumY / landmarks.length;
+    // Use palm center (midpoint of wrist and middle MCP) as the hand's center point.
+    // This is more stable than averaging all 21 landmarks (which shifts when fingers move).
+    const wrist = landmarks[0];
+    const middleMCP = landmarks[9];
+    const avgX = (wrist[0] + middleMCP[0]) / 2;
+    const avgY = (wrist[1] + middleMCP[1]) / 2;
     
     // Use EMA-smoothed scale to prevent tip jitter from ML noise amplification.
     // Falls back to instantaneous scale if smoothed isn't available yet.
@@ -4402,15 +4397,9 @@ function calculateNormalizeOffset(bufferedHands, layout) {
       ];
     });
     
-    // Recalculate average position after scaling (should be same, but recalculate for clarity)
-    let scaledSumX = 0;
-    let scaledSumY = 0;
-    for (let j = 0; j < scaledLandmarks.length; j++) {
-      scaledSumX += scaledLandmarks[j][0];
-      scaledSumY += scaledLandmarks[j][1];
-    }
-    const scaledAvgX = scaledSumX / scaledLandmarks.length;
-    const scaledAvgY = scaledSumY / scaledLandmarks.length;
+    // Palm center after scaling (same point since we scaled around it)
+    const scaledAvgX = avgX;
+    const scaledAvgY = avgY;
     
     // Convert to canvas coordinates (same mapping as video cover + ML stretch)
     const avgCanvasX = layout.ox + scaledAvgX * layout.sx;
