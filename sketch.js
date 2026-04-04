@@ -3134,6 +3134,23 @@ async function setup() {
               onChange: (v) => { animSvgShowRect = v; if (!v) animSvgDragging = null; }
             },
             {
+              type: 'button',
+              id: 'copy-svg-bounds',
+              label: 'Copy SVG Bounds',
+              variant: 'secondary',
+              block: true,
+              onClick: () => {
+                const r = animSvgRect || getAutoSvgRect();
+                const json = JSON.stringify({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) });
+                navigator.clipboard.writeText(json).then(() => {
+                  const btn = document.getElementById('copy-svg-bounds');
+                  btn.textContent = 'Copied!';
+                  setTimeout(() => btn.textContent = 'Copy SVG Bounds', 1500);
+                });
+                console.log('SVG bounds:', json);
+              }
+            },
+            {
               type: 'section',
               label: 'Preview & Export'
             },
