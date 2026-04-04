@@ -97,10 +97,10 @@ let animPreviewStart = 0;
 let animEasingType = 'smooth-step'; // 'linear' | 'ease-in' | 'ease-out' | 'smooth-step' | 'ease-in-out-cubic' | 'custom'
 let animCustomBezier = [0.42, 0, 0.58, 1]; // cubic-bezier control points [x1, y1, x2, y2]
 const ANIM_PATH_POINTS = 48;
-let animSvgW = 0; // 0 = auto-crop to hand bounding box
-let animSvgH = 0;
+let animSvgW = 620;
+let animSvgH = 600;
 let animSvgShowRect = false; // show the SVG bounding rect on canvas
-let animSvgRect = null; // {x, y, w, h} in screen space, null = compute from auto
+let animSvgRect = { x: 532, y: 9, w: 620, h: 600 }; // default SVG bounds
 let animSvgDragging = null; // 'move' | 'resize' | null
 let animSvgDragOff = { x: 0, y: 0 };
 
@@ -3108,7 +3108,7 @@ async function setup() {
                   min: 0,
                   max: 4000,
                   step: 1,
-                  value: 0,
+                  value: 620,
                   inline: true,
                   onChange: (v) => { animSvgW = v; }
                 },
@@ -3119,7 +3119,7 @@ async function setup() {
                   min: 0,
                   max: 4000,
                   step: 1,
-                  value: 0,
+                  value: 600,
                   inline: true,
                   onChange: (v) => { animSvgH = v; }
                 }
